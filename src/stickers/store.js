@@ -9,7 +9,7 @@
  */
 
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 
 /** How many stickers one sync asks for. */
 const FETCH_COUNT = 200;
@@ -307,16 +307,6 @@ export class StickerStore {
   }
 }
 
-/**
- * Absolute path of one preview file.
- *
- * @param {string} directory Sticker directory.
- * @param {string} file File name.
- * @returns {string} Absolute path.
- */
-export function previewPath(directory, file) {
-  return join(directory, String(file));
-}
 
 /**
  * Coerce one stored entry into a sticker.

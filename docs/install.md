@@ -21,7 +21,7 @@
 ```
 请帮我安装本地插件包，装完提醒我重启 DSH：
 
-file:///C:/你的路径/dsh-to-qq/dist/dsh-to-qq-0.49.1.tgz
+file:///C:/你的路径/dsh-to-qq/dist/dsh-to-qq-<版本>.tgz
 ```
 
 DSH 会用它的 `plugin_manager` 完成安装——这一步必须由 DSH 自己做，因为它要同时改 profile 的 `package.json` 和 Cordis 补丁；外部脚本硬改容易把 profile 弄坏。
@@ -35,7 +35,6 @@ DSH 会用它的 `plugin_manager` 完成安装——这一步必须由 DSH 自�
 | `-Open` | 装之前顺手启动 DSH |
 | `-DshDir "D:\DeepSeek Harness"` | 自动找不到 DSH 时手动指定 |
 | `-SnowLumaDir "D:\SnowLuma"` | 自动找不到 SnowLuma 时手动指定 |
-| `-Profile desktop` | 多 profile 时指定目标 |
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -Open

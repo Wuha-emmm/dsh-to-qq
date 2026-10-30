@@ -47,26 +47,20 @@ pnpm pack --pack-destination dist
 # 得到 dist\dsh-to-qq-<version>.tgz
 ```
 
-然后让 DSH 安装：
-
-- 图形界面：设置 → 插件 → 从文件安装，选那个 `.tgz`
-- 或在有 `dsh` 命令的终端里：
+然后让 DSH 安装。桌面版没有对外暴露 `dsh` 命令，最省事的方式是让 DSH 自己装：
 
 ```powershell
-dsh plugin install "file:///E:/你的路径/dist/dsh-to-qq-0.41.0.tgz" --profile desktop
+# 一键准备：自动打包并把安装指令复制到剪贴板
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
 ```
 
-也可以直接指向**解压后的目录**（开发时更省事）：
-
-```powershell
-dsh plugin install "E:\DSH-to-QQ" --profile desktop
-```
+把窗口里给出的那句「请帮我安装本地插件包 file:///…tgz」粘给 DSH 即可（它内部的 `plugin_manager` 会完成安装，同时改 profile 与 Cordis 补丁）。
 
 安装完成后**重启 DSH**（Host 半边的代码只在启动时加载）。
 
-### 方式 B：本仓库自己就是源码
+### 方式 B：直接从源码目录装
 
-如果你把这套文件放进 `%USERPROFILE%\.dsh\` 之外任意目录，方式 A 的"指向目录"即可。
+如果你就在仓库目录里开发，方式 A 已经够了：`setup.ps1` 会就地打包。想跳过打包直接让 DSH 指向源码目录，把该目录路径发给它安装即可。
 
 ## 4. 首次配置
 
@@ -80,12 +74,14 @@ dsh plugin install "E:\DSH-to-QQ" --profile desktop
 | 管理员 QQ | 你的大号 |
 | 群号 | 允许进出的群，逗号分隔 |
 
-`token` 不在界面显示，需要直接编辑配置文件：
+`token` 不在界面显示。两种给法，任选一种：
 
 ```json
 // %USERPROFILE%\.dsh\dsh-to-qq\config.json
-{ "connection": { "token": "<HTTP accessToken>" } }
+{ "connection": { "token": "<HTTP accessToken>", "httpToken": "<WS 若不同则填>" } }
 ```
+
+或者不把密钥写进文件：先 `setx QQ_BOT_TOKEN "<token>"`，再在 设置 → 连接 → **token 环境变量名** 填 `QQ_BOT_TOKEN`。
 
 改完重启 DSH，设置页顶部的状态点应变绿。
 
@@ -97,8 +93,8 @@ dsh plugin install "E:\DSH-to-QQ" --profile desktop
 2. 大号私聊机器人发「在吗」→ 应在几秒内回复
 3. 群里 @ 机器人问一句 → 应回复；不 @ 时不应答
 4. 让私聊发 `/记忆卡` → 应收到一张 PNG
-5. 发一条 3 秒语音 → 回复里带「语音转写（QQ 识别）：…」
-6. 设置 → 对话 → 表情包库 → 立即同步；同步完成后闲聊几句，看模型会不会在合适的时机发表情
+5. 发一条 3 秒语音 → 回复里带「语音转写（QQ 识别）：…」（没装本地语音服务时这是唯一路径）
+6. 设置 → 表情 → 点「识图」；同步完成后闲聊几句，看模型会不会在合适的时机发表情
 7. 引用一条消息再问 → 应能复述被引用的内容
 8. 打开设置页 → 连接页签显示绿色「已连接」
 
@@ -114,19 +110,19 @@ dsh plugin install "E:\DSH-to-QQ" --profile desktop
 
 备份直接复制整个 `dsh-to-qq` 目录即可。**`config.json` 含 token，分享前删掉。**
 
-档案默认保留 30 天（`archive.retentionDays`），插件每 6 小时自动清理一次数据库行与媒体文件；也可在设置 → 档案 里手动点「立即清理」。
-
 ## 7. 升级与卸载
 
 ```powershell
-# 升级：装新包后重启 DSH
-dsh plugin install "file:///.../dsh-to-qq-0.42.0.tgz" --profile desktop
+# 升级：重新打包，让 DSH 安装新版本，然后重启
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
+#   → 把窗口里给出的那句「请帮我安装本地插件包 file:///...tgz」粘给 DSH
 
-# 卸载
-dsh plugin remove dsh-to-qq --profile desktop
+# 卸载：让 DSH 的插件管理器移除 dsh-to-qq，然后重启
 ```
 
 升级不会动 `~/.dsh/dsh-to-qq/` 下的数据。卸载后要彻底清干净，再手删该目录。
+
+档案保留策略：数据库行按 `archive.retentionDays`（默认 30 天）、媒体文件按 `archive.mediaRetentionDays`（默认 7 天）清理，每 6 小时自动跑一次；也能在设置 → 档案 里手动点「立即清理」。
 
 ## 8. 安全须知
 

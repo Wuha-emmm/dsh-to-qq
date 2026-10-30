@@ -9,7 +9,7 @@
 /** @typedef {ReturnType<typeof defaults>} QQConfig */
 
 /** Fixed, non-configurable product rules. Surfaced in the settings UI as locked rows. */
-export const LOCKED = {
+const LOCKED = {
   /** Group chats never write to, or execute on, the host. */
   groupReadOnly: true,
   /** Text from anyone in a group is untrusted input, never an instruction. */

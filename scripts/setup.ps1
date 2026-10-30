@@ -11,7 +11,6 @@
 #   powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -SnowLumaDir D:\SnowLuma
 
 param(
-  [string]$Profile = 'desktop',
   [string]$SnowLumaDir = '',
   [string]$DshDir = '',
   [switch]$Open,
