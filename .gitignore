@@ -1,7 +1,19 @@
+# runtime data at the repo root (the real state lives in ~/.dsh/dsh-to-qq/)
+/archive/
+/media/
+/logs/
+/dist/
+/config.json
+/memory.json
+/stickers.json
+/sessions.json
+/guests.json
+/archive.db*
+/notes/
+/tmp-*
+
+# build and editor noise
 node_modules/
-dist/
-logs/
-archive/
 *.tgz
 *.log
 .DS_Store
@@ -9,17 +21,8 @@ Thumbs.db
 .vscode/
 .idea/
 coverage/
-# local state is outside the repo, but guard against copies
+
+# local state copies, wherever they appear
 .dsh/
-config.json
-memory.json
-stickers.json
-sessions.json
-guests.json
-archive.db*
-media/
-notes/
 .env
 *.local.json
-tmp-*
-
