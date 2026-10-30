@@ -193,6 +193,109 @@ async function renderPayloadUncached(payload, options = {}) {
  * @param {{ log?: (line: string) => void, backdropDir?: string }} [options] Wiring.
  * @returns {Promise<string>} A `base64://` payload.
  */
+/**
+ * Lay out the persona block so a run-on paragraph reads like speech, not a wall.
+ *
+ * Only line breaks are inserted; every character of the original sentence stays.
+ * Sentences end a line, long sentences break at a comma when one is close to the
+ * limit, and blank lines separate the paragraphs the owner wrote.
+ *
+ * @param {string} text Persona text from the card.
+ * @param {{ width?: number }} [options] Soft line width in characters.
+ * @returns {string} Text with newlines, ready for the renderer.
+ */
+/**
+ * Lay out the persona block so a run-on paragraph reads like speech, not a wall.
+ *
+ * Only line breaks and bullet markers are added; every character of the original
+ * sentence stays. The first sentence stays a lead-in, the rest become bullets,
+ * long sentences break at a comma, and blank lines separate real paragraphs.
+ *
+ * @param {string} text Persona text from the card.
+ * @param {{ width?: number, bullets?: boolean }} [options] Layout options.
+ * @returns {string} Text with newlines, ready for the renderer.
+ */
+export function layoutPersona(text, options = {}) {
+  const width = Math.max(12, Math.min(60, Number(options.width) || 30));
+  const bullets = options.bullets !== false;
+  const raw = String(text ?? '').replace(/\r\n/g, '\n').trim();
+  if (raw === '') return '';
+
+  const lines = [];
+  // A blank line marks a real paragraph; a single newline is just a line break
+  // the owner typed, so the function stays idempotent when called twice.
+  const paragraphs = raw.split(/\n{2,}/).map(part => part.trim()).filter(Boolean);
+  for (const paragraph of paragraphs) {
+    const segments = paragraph.split(/\n/).map(part => part.trim()).filter(Boolean);
+    // Already a bullet list (our own output, or a persona the owner wrote that
+    // way): keep every item a bullet and skip the lead-in handling.
+    const alreadyList = segments.length > 0 && segments.every(part => /^[·•\-]\s*/.test(part));
+    const sentences = [];
+    for (const segment of segments) {
+      const clean = segment.replace(/^[·•\-]\s*/, '').trim();
+      if (clean === '') continue;
+      const found = clean.match(/[^。！？；!?;]+[。！？；!?;]?/g) ?? [clean];
+      for (const sentence of found) {
+        const piece = sentence.trim();
+        if (piece !== '') sentences.push(piece);
+      }
+    }
+    if (sentences.length === 0) continue;
+
+    if (alreadyList) {
+      for (const sentence of sentences) {
+        splitLongSentence(sentence, bullets ? width - 2 : width).forEach(piece => {
+          lines.push(bullets ? `· ${piece}` : piece);
+        });
+      }
+      lines.push('');
+      continue;
+    }
+
+    lines.push(...splitLongSentence(sentences[0], width));
+    const rest = sentences.slice(1);
+    if (rest.length > 0) {
+      if (bullets) lines.push('');
+      for (const sentence of rest) {
+        const pieces = splitLongSentence(sentence, bullets ? width - 2 : width);
+        pieces.forEach((piece, index) => {
+          lines.push(index === 0 && bullets ? `· ${piece}` : piece);
+        });
+      }
+    }
+    // Blank line between the paragraphs the owner actually wrote.
+    lines.push('');
+  }
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  return lines.join('\n');
+}
+
+/**
+ * Break one sentence at clause punctuation, never inside a clause.
+ *
+ * @param {string} sentence One sentence including its final punctuation.
+ * @param {number} width Soft limit in characters.
+ * @returns {string[]} Pieces, each at most ~width characters.
+ */
+function splitLongSentence(sentence, width) {
+  const chars = [...sentence];
+  if (chars.length <= width) return [sentence];
+  const pieces = [];
+  let rest = chars;
+  while (rest.length > width) {
+    let cut = -1;
+    for (let index = Math.min(width, rest.length - 1); index >= Math.floor(width * 0.55); index -= 1) {
+      if ('，、,：:'.includes(rest[index])) { cut = index + 1; break; }
+    }
+    if (cut <= 0) cut = width;
+    pieces.push(rest.slice(0, cut).join('').trim());
+    rest = rest.slice(cut);
+    while (rest.length > 0 && rest[0] === ' ') rest = rest.slice(1);
+  }
+  if (rest.length > 0) pieces.push(rest.join('').trim());
+  return pieces.filter(piece => piece !== '');
+}
+
 export async function renderMemoryCard(card, options = {}) {
   const notes = Array.isArray(card.notes) ? card.notes : [];
   const noteCount = notes.length;
@@ -204,7 +307,7 @@ export async function renderMemoryCard(card, options = {}) {
     title: `${card.name ?? ''}（QQ ${card.qq}）`,
     subtitle: `${noteCount} 条笔记 · ${role}`,
     personaLabel: '我该怎么跟你说话',
-    persona: String(card.persona ?? ''),
+    persona: layoutPersona(String(card.persona ?? '')),
     notesLabel: '我对你的印象',
     // The renderer draws top-down; show the newest note first.
     notes: [...notes].reverse(),
