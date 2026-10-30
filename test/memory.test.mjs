@@ -10,7 +10,7 @@ test('MemoryStore starts empty, notes append, and caps trim the oldest', async (
   try {
     const store = new MemoryStore(join(dir, 'memory.json'));
     await store.load();
-    assert.deepEqual(store.get(10001), { notes: [], persona: null, impressionCursor: 0 });
+    assert.deepEqual(store.get(10001), { notes: [], persona: null, impressionCursor: 0, name: '' });
 
     await store.addNote(10001, '喜欢简洁的回答');
     await store.addNote(10001, '在做一个 QQ 桥接插件', 30);
@@ -41,7 +41,7 @@ test('MemoryStore persists, reloads, and clears per owner', async () => {
     assert.equal(reloaded.get(20002).notes[0].text, '叫我老白');
 
     await reloaded.clear(20002);
-    assert.deepEqual(reloaded.get(20002), { notes: [], persona: null, impressionCursor: 0 });
+    assert.deepEqual(reloaded.get(20002), { notes: [], persona: null, impressionCursor: 0, name: '' });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -77,4 +77,20 @@ test('a note is trimmed to one short line and blank notes are ignored', async ()
   }
 });
 
+test('MemoryStore keeps the display name across a reload', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-to-qq-'));
+  try {
+    const file = join(dir, 'memory.json');
+    const store = new MemoryStore(file);
+    await store.load();
+    assert.equal(await store.setName(30003, '老白'), true);
+    assert.equal(await store.setName(30003, '老白'), false, 'an unchanged name is not rewritten');
+    assert.equal(await store.setName(30003, ''), false, 'an empty name is ignored');
 
+    const reloaded = new MemoryStore(file);
+    await reloaded.load();
+    assert.equal(reloaded.get(30003).name, '老白');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

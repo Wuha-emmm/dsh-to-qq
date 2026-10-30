@@ -296,6 +296,18 @@ function splitLongSentence(sentence, width) {
   return pieces.filter(piece => piece !== '');
 }
 
+/**
+ * Card title: 【name】QQ 123, or QQ 123 when the name is unknown.
+ *
+ * @param {string | undefined} name Display name.
+ * @param {number} qq QQ number.
+ * @returns {string} Title text.
+ */
+export function cardTitle(name, qq) {
+  const clean = String(name ?? '').trim();
+  return clean === '' ? `QQ ${qq}` : `【${clean}】QQ ${qq}`;
+}
+
 export async function renderMemoryCard(card, options = {}) {
   const notes = Array.isArray(card.notes) ? card.notes : [];
   const noteCount = notes.length;
@@ -304,7 +316,7 @@ export async function renderMemoryCard(card, options = {}) {
     template: 'personal',
     sceneKey: card.qq,
     qq: card.qq,
-    title: `${card.name ?? ''}（QQ ${card.qq}）`,
+    title: cardTitle(card.name, card.qq),
     subtitle: `${noteCount} 条笔记 · ${role}`,
     personaLabel: '我该怎么跟你说话',
     persona: layoutPersona(String(card.persona ?? '')),

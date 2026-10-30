@@ -46,10 +46,11 @@ export function registerMemoryCardTool(ctx, options) {
       if (card === undefined) throw new Error('that person has no memory card yet');
 
       const { renderMemoryCard } = await import('../render/memory-card.js');
-      const { sceneLabelFor } = await import('../bridge/labels.js');
+      const { sceneLabelFor, resolveName } = await import('../bridge/labels.js');
+      const name = await resolveName(bridge, target, card.name, info.scene);
       const payload = await renderMemoryCard({
         qq: target,
-        name: card.name ?? '',
+        name,
         persona: card.persona?.text ?? '',
         notes: card.notes ?? [],
         admin: options.store.get().access.admins.some(admin => admin.qq === target),

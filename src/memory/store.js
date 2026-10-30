@@ -72,7 +72,7 @@ export class MemoryStore {
     const existing = this.cards.get(key);
     if (existing !== undefined) return existing;
     /** @type {MemoryCard} */
-    const fresh = { notes: [], persona: null, impressionCursor: 0 };
+    const fresh = { notes: [], persona: null, impressionCursor: 0, name: '' };
     this.cards.set(key, fresh);
     return fresh;
   }
@@ -88,6 +88,26 @@ export class MemoryStore {
     const card = this.get(qq);
     card.notes = Array.isArray(notes) ? notes : [];
     await this.save();
+  }
+
+  /**
+   * Remember the display name last seen for this person.
+   *
+   * The name only lives in the QQ event, so without this the card could not be
+   * titled after a restart.
+   *
+   * @param {number | string} qq Owner QQ number.
+   * @param {string} name Display name from the event.
+   * @returns {Promise<boolean>} True when the stored name changed.
+   */
+  async setName(qq, name) {
+    const clean = String(name ?? '').trim().slice(0, 40);
+    if (clean === '') return false;
+    const card = this.get(qq);
+    if (card.name === clean) return false;
+    card.name = clean;
+    await this.save();
+    return true;
   }
 
   /**
@@ -239,7 +259,7 @@ function normalizeCard(value) {
   const persona = value?.persona !== null && typeof value?.persona === 'object' && typeof value.persona.text === 'string'
     ? { text: value.persona.text, at: Number(value.persona.at) || 0 }
     : null;
-  return { notes, persona };
+  return { notes, persona, name: typeof value?.name === 'string' ? value.name.slice(0, 40) : '' };
 }
 
 /**

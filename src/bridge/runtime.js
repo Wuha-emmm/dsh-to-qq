@@ -889,6 +889,12 @@ export class Bridge {
     // A person who asks for no stickers should not have to argue with a model.
     this.#noteStickerPreference(message);
 
+    // Keep the display name next to the QQ number: the card is titled with it,
+    // and the name only exists in the event payload.
+    if (String(message.senderName ?? '').trim() !== '') {
+      void this.memory?.setName(message.senderId, message.senderName).catch(() => {});
+    }
+
     // Buffer before filtering: group context is made of chatter too.
     this.buffer.push(message.scene, {
       senderId: message.senderId,

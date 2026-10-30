@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { renderTextImage, renderTextImageBase64 } from '../src/render/text-image.js';
+import { cardTitle } from '../src/render/memory-card.js';
 
 const windows = process.platform === 'win32';
 
@@ -42,4 +43,11 @@ test('returns a base64 payload for OneBot image segments', { skip: !windows }, a
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('the card title carries the name and the QQ number', () => {
+  assert.equal(cardTitle('呜哈', 1363309111), '【呜哈】QQ 1363309111');
+  assert.equal(cardTitle('  老白  ', 20002), '【老白】QQ 20002');
+  assert.equal(cardTitle('', 20002), 'QQ 20002');
+  assert.equal(cardTitle(undefined, 20002), 'QQ 20002');
 });

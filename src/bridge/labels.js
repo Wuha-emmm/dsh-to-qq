@@ -48,3 +48,38 @@ export async function sceneLabelFor(client, scene) {
   const name = await fetchGroupName(client, gid);
   return formatGroupLabel(gid, name);
 }
+
+/**
+ * Display name for one QQ number.
+ *
+ * Order: the card's stored name, an already known sender name, then the
+ * transport (group card / nickname). Returns '' when nothing is known, and the
+ * caller falls back to the bare QQ number.
+ *
+ * @param {{ client?: any, memory?: any }} bridge Bridge with client and memory.
+ * @param {number} qq Target QQ number.
+ * @param {string} [known] Name already stored on the memory card.
+ * @param {string} [scene] Current scene key, used to pick the group query.
+ * @returns {Promise<string>} Display name, possibly empty.
+ */
+export async function resolveName(bridge, qq, known, scene) {
+  const stored = String(known ?? '').trim();
+  if (stored !== '') return stored;
+  const fromMemory = String(bridge?.memory?.get?.(qq)?.name ?? '').trim();
+  if (fromMemory !== '') return fromMemory;
+  const client = bridge?.client;
+  if (client === undefined || !Number.isInteger(qq) || qq <= 0) return '';
+  try {
+    if (typeof scene === 'string' && scene.startsWith('group:')) {
+      const gid = Number(scene.slice(scene.indexOf(':') + 1));
+      const info = await client.call('get_group_member_info', { group_id: gid, user_id: qq, no_cache: false }, { timeoutMs: 5000 });
+      const name = info?.card ?? info?.data?.card ?? info?.nickname ?? info?.data?.nickname ?? '';
+      return typeof name === 'string' ? name.trim() : '';
+    }
+    const info = await client.call('get_stranger_info', { user_id: qq, no_cache: false }, { timeoutMs: 5000 });
+    const name = info?.nickname ?? info?.data?.nickname ?? info?.card ?? info?.data?.card ?? '';
+    return typeof name === 'string' ? name.trim() : '';
+  } catch {
+    return '';
+  }
+}
