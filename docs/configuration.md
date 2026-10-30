@@ -15,6 +15,7 @@
 | `httpUrl` | `http://127.0.0.1:3000` | — | OneBot HTTP 地址，用于发消息、查状态、取语音 |
 | `wsUrl` | `ws://127.0.0.1:3001` | — | OneBot 事件推送地址 |
 | `eventPath` | `/` | — | 事件路径，SnowLuma 为 `/` |
+| `botUin` | `0` | `0 ~ 99999999999` |  |
 | `token` | `""`（空） | — | OneBot HTTP access token（设置页不显示） |
 | `httpToken` | `""`（空） | — | 桥面板的额外口令（可留空，面板已限本机同源） |
 | `autoStart` | `true` | — | DSH 启动时顺带拉起 SnowLuma |
@@ -103,6 +104,7 @@
 | `enabled` | `true` | — | 是否记录聊天档案 |
 | `media` | `false` | — | 把收到的图片存到本地 media/ |
 | `retentionDays` | `30` | `0 ~ 3650` | 档案与媒体的保留天数（0 = 永久） |
+| `mediaRetentionDays` | `7` | `0 ~ 3650` |  |
 
 ## stickers
 

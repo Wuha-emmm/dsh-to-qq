@@ -31,6 +31,8 @@ export class Quota {
     /** @type {Map<number, number[]>} */
     this.minute = new Map();
     this.day = dayKey();
+    /** Set by record(); the host persists on a timer. */
+    this.dirty = false;
   }
 
   /** Drop yesterday's counters. */
@@ -88,6 +90,39 @@ export class Quota {
     const recent = (this.minute.get(message.senderId) ?? []).filter(at => now - at < MINUTE_MS);
     recent.push(now);
     this.minute.set(message.senderId, recent);
+    this.dirty = true;
+  }
+
+  /** @returns {{ day: string, daily: Array<[string, number]>, minute: Array<[number, number[]]> }} State to persist. */
+  toJSON() {
+    return { day: this.day, daily: [...this.daily], minute: [...this.minute] };
+  }
+
+  /**
+   * Restore counters saved before a restart.
+   *
+   * Counters from an earlier day are dropped: the daily window has moved.
+   *
+   * @param {any} payload Parsed quota file.
+   * @param {number} [now] Epoch milliseconds.
+   * @returns {boolean} True when anything was restored.
+   */
+  restore(payload, now = Date.now()) {
+    if (payload === null || typeof payload !== 'object') return false;
+    if (String(payload.day ?? '') !== dayKey(now)) return false;
+    this.day = payload.day;
+    this.daily.clear();
+    for (const entry of Array.isArray(payload.daily) ? payload.daily : []) {
+      if (Array.isArray(entry) && entry.length === 2) this.daily.set(String(entry[0]), Number(entry[1]) || 0);
+    }
+    this.minute.clear();
+    for (const entry of Array.isArray(payload.minute) ? payload.minute : []) {
+      if (!Array.isArray(entry) || entry.length !== 2) continue;
+      const recent = (Array.isArray(entry[1]) ? entry[1] : []).filter(at => now - Number(at) < MINUTE_MS);
+      if (recent.length > 0) this.minute.set(Number(entry[0]), recent);
+    }
+    this.dirty = false;
+    return true;
   }
 
   /** @returns {{ day: string, senders: number, scenes: number }} A small snapshot. */

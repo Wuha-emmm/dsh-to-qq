@@ -73,25 +73,11 @@ export function mayWrite(tier) {
  * Whether a tier may read the host filesystem.
  *
  * @param {Tier} tier The sender's tier.
- * @returns {boolean} True for the owner in private or in a group.
+ * @returns {boolean} True only for the owner's private chat, where filesystem tools exist.
  */
 export function mayRead(tier) {
-  return tier === 'owner' || tier === 'owner-group';
+  return tier === 'owner';
 }
 
-/**
- * Tool allowlist for one tier, applied with `ctx.tools.restrict()`.
- *
- * @param {Tier} tier The sender's tier.
- * @returns {string[]} Tool names the tier may use.
- */
-export function allowedTools(tier) {
-  const chat = ['web_search', 'web_fetch'];
-  const read = ['read', 'glob', 'grep', 'read_image'];
-  const memory = ['memory_card_get', 'memory_persona_set', 'memory_card_clear'];
-  const send = ['qq_send'];
-  if (tier === 'owner') return [...chat, ...read, ...memory, ...send, 'qq_action', 'qq_history', 'qq_resend'];
-  if (tier === 'owner-group') return [...chat, ...read, ...memory, ...send, 'qq_history'];
-  return [...chat, ...memory, ...send];
-}
+
 

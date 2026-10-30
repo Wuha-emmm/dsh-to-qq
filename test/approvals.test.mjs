@@ -1,23 +1,36 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Approvals, DANGEROUS_TOOLS } from '../src/policy/approvals.js';
+import { Approvals, DANGEROUS_TOOLS, callSignature } from '../src/policy/approvals.js';
 
-test('a grant only covers the tool that was requested', () => {
+test('a grant only covers the exact call that was requested', () => {
   const approvals = new Approvals();
-  approvals.request('dm:1', 'pwsh');
-  assert.equal(approvals.allowed('dm:1', 'pwsh'), false, 'nothing is allowed before /yes');
-  assert.equal(approvals.grant('dm:1'), 'pwsh');
-  assert.equal(approvals.allowed('dm:1', 'pwsh'), true);
-  assert.equal(approvals.allowed('dm:1', 'write'), false, 'other tools stay blocked');
+  approvals.request('dm:1', 'pwsh', { command: 'git status' });
+  assert.equal(approvals.allowed('dm:1', 'pwsh', { command: 'git status' }), false, 'nothing is allowed before /yes');
+
+  const granted = approvals.grant('dm:1');
+  assert.equal(granted.tool, 'pwsh');
+  assert.match(granted.preview, /git status/);
+
+  assert.equal(approvals.allowed('dm:1', 'pwsh', { command: 'git status' }), true);
+  assert.equal(approvals.allowed('dm:1', 'pwsh', { command: 'rm -rf /' }), false, 'another command stays blocked');
+  assert.equal(approvals.allowed('dm:1', 'write', { command: 'git status' }), false, 'other tools stay blocked');
 });
 
 test('a grant expires after its ttl', () => {
   const approvals = new Approvals(1000);
   const now = Date.now();
-  approvals.request('dm:1', 'write');
+  approvals.request('dm:1', 'write', { path: 'a.txt' });
   approvals.grant('dm:1');
-  assert.equal(approvals.allowed('dm:1', 'write', now), true);
-  assert.equal(approvals.allowed('dm:1', 'write', now + 2000), false);
+  assert.equal(approvals.allowed('dm:1', 'write', { path: 'a.txt' }, now), true);
+  assert.equal(approvals.allowed('dm:1', 'write', { path: 'a.txt' }, now + 2000), false);
+});
+
+test('a stale pending request cannot be approved later', () => {
+  const approvals = new Approvals(60_000, 1000);
+  approvals.request('dm:1', 'pwsh', { command: 'ls' });
+  const later = Date.now() + 5000;
+  assert.equal(approvals.grant('dm:1', later), undefined, 'pending expires');
+  assert.equal(approvals.allowed('dm:1', 'pwsh', { command: 'ls' }, later), false);
 });
 
 test('granting without a pending request reports nothing', () => {
@@ -27,9 +40,16 @@ test('granting without a pending request reports nothing', () => {
 
 test('scenes do not share grants', () => {
   const approvals = new Approvals();
-  approvals.request('dm:1', 'pwsh');
+  approvals.request('dm:1', 'pwsh', { command: 'ls' });
   approvals.grant('dm:1');
-  assert.equal(approvals.allowed('dm:2', 'pwsh'), false);
+  assert.equal(approvals.allowed('dm:2', 'pwsh', { command: 'ls' }), false);
+});
+
+test('the argument signature is stable across key order and string forms', () => {
+  assert.equal(callSignature({ a: 1, b: 2 }), callSignature({ b: 2, a: 1 }));
+  assert.equal(callSignature('{"a":1,"b":2}'), callSignature({ a: 1, b: 2 }));
+  assert.notEqual(callSignature({ a: 1 }), callSignature({ a: 2 }));
+  assert.equal(callSignature(''), '');
 });
 
 test('the dangerous set covers the write and execute tools', () => {

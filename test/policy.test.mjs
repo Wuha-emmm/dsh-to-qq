@@ -101,7 +101,7 @@ test('installTierRestriction intersects the allowlist with registered tools', ()
   assert.deepEqual(restrictions[0], { allow: ['web_search', 'qq_send'] });
 
   installTierRestriction({ tools, agent }, 'owner-group');
-  assert.deepEqual(restrictions[1].allow, ['read', 'grep', 'web_search', 'qq_send']);
+  assert.deepEqual(restrictions[1].allow, ['web_search', 'qq_send'], 'groups get no filesystem tools');
   assert.equal(disposers.length, 2);
 });
 

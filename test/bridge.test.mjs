@@ -87,7 +87,7 @@ test('tierOf decides by sender, not by scene', () => {
   assert.equal(tierOf(strangerGroup, config.access), 'member-group');
   assert.equal(mayWrite('owner'), true);
   assert.equal(mayWrite('owner-group'), false);
-  assert.equal(mayRead('owner-group'), true);
+  assert.equal(mayRead('owner-group'), false, 'a group carries untrusted text');
   assert.equal(mayRead('member-group'), false);
 });
 
@@ -133,4 +133,5 @@ test('chunkText splits on lines and respects the limit', () => {
 test('defaults keep the documented runtime shape', () => {
   assert.equal(defaults().limits.replyDelayMs, 2000);
 });
+
 

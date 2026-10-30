@@ -848,8 +848,19 @@ export class Bridge {
     this.counters.events += 1;
     const message = normalizeEvent(event);
     if (message === undefined) return;
-    // Learn our own QQ number so impressions never get written for the bot.
-    if (Number.isInteger(message.selfId) && message.selfId > 0) this.selfId = message.selfId;
+    // Pin the bot account: an event claiming another self_id cannot be trusted,
+    // because identity comes only from the event payload.
+    const seenSelf = Number(message.selfId) || 0;
+    const expectedSelf = Number(config.connection.botUin) || 0;
+    if (seenSelf > 0) {
+      if ((expectedSelf > 0 && seenSelf !== expectedSelf) || (this.selfId !== 0 && seenSelf !== this.selfId)) {
+        this.counters.ignored += 1;
+        const pinned = expectedSelf > 0 ? expectedSelf : this.selfId;
+        this.log(`dropped event with foreign self_id ${seenSelf} (expected ${pinned})`);
+        return;
+      }
+      this.selfId = seenSelf;
+    }
 
     // A person who asks for no stickers should not have to argue with a model.
     this.#noteStickerPreference(message);
@@ -912,10 +923,15 @@ export class Bridge {
 
     // `/yes` approves the tool the model just tried to run, then the admin retries.
     if (tier === 'owner' && /^\/(yes|ok|确认)$/i.test(message.text.trim())) {
-      const tool = this.approvals?.grant(message.scene);
+      const approved = this.approvals?.grant(message.scene);
+      const label = approved === undefined
+        ? ''
+        : (approved.preview === '' ? approved.tool : `${approved.tool} ${approved.preview}`);
       await this.sendText(
         message,
-        tool === undefined ? '现在没有待确认的操作。' : `已确认 ${tool}（60 秒内有效），让它重试就行。`,
+        approved === undefined
+          ? '现在没有待确认的操作（或已超过 5 分钟，需要让它重新试一次）。'
+          : `已确认 ${label}（60 秒内有效，只批这一条），让它重试就行。`,
       );
       return;
     }

@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { ConfigStore, defaultConfigPath } from './config/store.js';
 import { mergeConfig } from './config/defaults.js';
 import { mergeIncomingConfig } from './config/merge.js';
-import { readFile } from 'node:fs/promises';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 import { pickRoute } from './llm/route.js';
 import { panelAccess } from './web/guard.js';
 import { pruneMedia } from './media/prune.js';
@@ -38,7 +38,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.49.1';
+const VERSION = '0.50.0';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -238,9 +238,12 @@ export function apply(ctx) {
   schedule(() => {
     const days = store.get().archive.retentionDays;
     if (!(days > 0)) return;
+    // Rows and their media can age out at different speeds: a file nobody points
+    // at any more is dead weight, while recent rows may still be worth keeping.
+    const mediaDays = Number(store.get().archive.mediaRetentionDays) || days;
     const removed = bridge.archive?.prune(days) ?? 0;
-    void pruneMedia(join(stateDir, 'media'), days, { log }).then(files => {
-      if (removed > 0 || files > 0) log(`retention: removed ${removed} rows, ${files} media files (${days} days)`);
+    void pruneMedia(join(stateDir, 'media'), mediaDays, { log }).then(files => {
+      if (removed > 0 || files > 0) log(`retention: removed ${removed} rows (${days}d), ${files} media files (${mediaDays}d)`);
     }).catch(error => log(`retention failed: ${error?.message ?? error}`));
   }, 6 * 3600_000);
 
@@ -261,15 +264,31 @@ export function apply(ctx) {
   };
   schedule(syncStickers, 60_000, { once: true });
   schedule(syncStickers, 12 * 3600_000);
+
+  // Quota counters live in memory for speed; persist them so a restart does not
+  // hand everyone a fresh daily allowance.
+  const quotaFile = join(stateDir, 'quota.json');
+  schedule(() => {
+    if (bridge.quota.dirty !== true) return;
+    bridge.quota.dirty = false;
+    const temporary = `${quotaFile}.tmp`;
+    void writeFile(temporary, JSON.stringify(bridge.quota.toJSON()), 'utf8')
+      .then(() => rename(temporary, quotaFile))
+      .catch(error => log(`quota save failed: ${error?.message ?? error}`));
+  }, 30_000);
   // Dangerous tools called from a QQ session need an explicit `/yes` first.
   ctx.effect(() => ctx.tools.guard(execution => {
     if (store.get().safety.confirmWrite !== true) return undefined;
     const info = bridge.sessionContext(String(execution?.agent?.id ?? ''));
     if (info === undefined || info.tier !== 'owner') return undefined;
     if (!DANGEROUS_TOOLS.has(execution.name)) return undefined;
-    if (approvals.allowed(info.scene, execution.name)) return undefined;
-    approvals.request(info.scene, execution.name);
-    return `这一步需要管理员确认：${execution.name}。请在 QQ 里回复 /yes（60 秒内有效），然后再让我重试。`;
+    // Approve the exact call, not the whole tool: a grant for `pwsh` would be a
+    // shell window, a grant for this one command is just that command.
+    if (approvals.allowed(info.scene, execution.name, execution.arguments)) return undefined;
+    approvals.request(info.scene, execution.name, execution.arguments);
+    const preview = approvals.pendingOf(info.scene)?.preview ?? '';
+    const detail = preview === '' ? '' : `（${preview}）`;
+    return `这一步需要管理员确认：${execution.name}${detail}。请在 QQ 里回复 /yes（60 秒内有效，只批这一条），然后再让我重试。`;
   }));
 
   /** Panel opens requested from the pet's right-click menu. */
@@ -347,6 +366,9 @@ export function apply(ctx) {
   ctx.effect(() => {
     void memory.load().catch(error => log(`memory load failed: ${error.message}`));
   void stickers.load().catch(error => log(`sticker load failed: ${error.message}`));
+  void readFile(join(stateDir, 'quota.json'), 'utf8').then(text => {
+    if (bridge.quota.restore(JSON.parse(text))) log('quota counters restored');
+  }).catch(() => {});
     return registerMemoryTools(ctx, {
       store: memory,
       limits: () => store.get().memory,
@@ -554,9 +576,9 @@ export function apply(ctx) {
           // Keep the configured retention.
         }
         const removed = bridge.archive?.prune(days) ?? 0;
-        // Files carry the same retention as the rows that point at them.
-        const files = await pruneMedia(join(stateDir, 'media'), days, { log });
-        send(200, { removed, files, days });
+        const mediaDays = Number(store.get().archive.mediaRetentionDays) || days;
+        const files = await pruneMedia(join(stateDir, 'media'), mediaDays, { log });
+        send(200, { removed, files, days, mediaDays });
         return;
       }
       if (url.pathname === '/dsh-to-qq/api/state') {
@@ -887,6 +909,8 @@ export function apply(ctx) {
         `sessions ${Object.keys(map.all()).length} buffered scenes ${snapshot.scenes}`,
         `events ${snapshot.counters.events} messages ${snapshot.counters.messages} deduped ${snapshot.counters.deduped}`,
         `ignored ${snapshot.counters.ignored} throttled ${snapshot.counters.throttled} answered ${snapshot.counters.answered} failed ${snapshot.counters.failed} errors ${snapshot.counters.errors}`,
+        `quota day ${bridge.quota.snapshot().day} senders ${bridge.quota.snapshot().senders} scenes ${bridge.quota.snapshot().scenes}${bridge.quota.dirty ? " (unsaved)" : ""}`,
+        `bot ${bridge.selfId === 0 ? "(unknown)" : bridge.selfId}${bridge.selfId === 0 ? "" : " (pinned)"}`,
         `config ${store.file}`,
         lastImageError === '' ? 'images ok' : `last image error: ${lastImageError}`,
         (() => {
@@ -920,6 +944,8 @@ export function apply(ctx) {
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
 }
+
+
 
 
 

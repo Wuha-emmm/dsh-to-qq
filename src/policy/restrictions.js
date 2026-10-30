@@ -11,11 +11,10 @@
  * registered, because `tools.restrict()` rejects unknown names.
  */
 export const TIER_TOOLS = {
+  // A group carries untrusted text, so this tier gets no filesystem tools even
+  // when the sender is an administrator: one quoted message could otherwise turn
+  // a reply into a full-disk read.
   'owner-group': [
-    'read',
-    'glob',
-    'grep',
-    'read_image',
     'web_search',
     'web_fetch',
     'qq_send',
@@ -132,6 +131,7 @@ export function installTierRestriction(services, tier) {
   }
   return agentCtx.effect(() => scopedTools.restrict({ allow }));
 }
+
 
 
 

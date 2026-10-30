@@ -28,9 +28,11 @@ test('guest tiers never see shell or filesystem tools', () => {
   }
 });
 
-test('the admin keeps file-reading tools inside groups', () => {
-  for (const allowed of ['read', 'glob', 'grep', 'qq_send']) {
+test('the admin loses filesystem tools inside groups', () => {
+  for (const forbidden of ['read', 'glob', 'grep', 'read_image', 'pwsh', 'write']) {
+    assert.equal(TIER_TOOLS['owner-group'].includes(forbidden), false, `${forbidden} must stay out of groups`);
+  }
+  for (const allowed of ['web_search', 'qq_send', 'memory_note']) {
     assert.equal(TIER_TOOLS['owner-group'].includes(allowed), true, allowed);
   }
-  assert.equal(TIER_TOOLS['owner-group'].includes('pwsh'), false);
 });

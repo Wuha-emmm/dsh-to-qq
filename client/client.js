@@ -542,6 +542,7 @@ window.__ModuleLoader__.load({
           { path: 'connection.wsUrl', label: 'OneBot WS', type: 'text', placeholder: 'ws://127.0.0.1:3001' },
           { path: 'connection.eventPath', label: '事件路径', type: 'text', placeholder: '/' },
           { path: 'connection.snowlumaDir', label: 'SnowLuma 目录', type: 'text', placeholder: 'D:\\SnowLuma' },
+          { path: 'connection.botUin', label: '机器人 QQ 号（0 = 自动识别）', type: 'number' },
           { path: 'connection.autoStart', label: '自动启动 SnowLuma', type: 'checkbox' },
           { path: 'ui.pet', label: '与 dsh-pet 联动', type: 'checkbox' },
           { path: 'ui.petId', label: '宠物 id', type: 'text', placeholder: 'main' },
@@ -761,6 +762,8 @@ window.__ModuleLoader__.load({
       'voice.language': '识别语言，如 zh / en',
       'voice.command': '本地识别命令，{input} {language} 占位；留空不用',
       'archive.retentionDays': '档案保留天数，0 = 永久',
+      'archive.mediaRetentionDays': '图片/语音/文件保留天数，通常比档案短',
+      'connection.botUin': '填了就只接受这个号的事件；0 = 从第一条事件学习后锁定',
       'archive.media': '把收到的图片/转发图存到本地',
     };
 
@@ -1203,7 +1206,7 @@ const StickerBoard = () => {
           first: rowIndex === 1,
           onChange: next => {
             setConfig(current => setPath(current, field.path, next));
-            setStatus({ kind: ', text: ' });
+            setStatus({ kind: 'dirty', text: '有未保存的修改' });
           },
         });
       };
@@ -1265,6 +1268,7 @@ const StickerBoard = () => {
           : [
             h('div', { key: 'card', style: UI.card },
               fieldRow({ path: 'archive.retentionDays', label: '保留天数', type: 'number' }),
+              fieldRow({ path: 'archive.mediaRetentionDays', label: '媒体保留天数', type: 'number' }),
               fieldRow({ path: 'archive.media', label: '把收到的图片存到本地', type: 'checkbox' }),
               h(ArchiveBox, { key: 'archive' })),
           ];

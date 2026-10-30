@@ -4,7 +4,7 @@
 
 > Bridge between QQ and DeepSeek Harness. Owner DMs get full local access; group mentions stay read-only.
 
-`Node ≥ 22` · `MIT` · 零 npm 运行时依赖 · 单测 189 条
+`Node ≥ 22` · `MIT` · 零 npm 运行时依赖 · 单测 191 条
 
 ---
 
@@ -49,7 +49,7 @@ file:///<你的路径>/dsh-to-qq/dist/dsh-to-qq-<版本>.tgz
 |---|---|---|---|
 | 会话驱动（回复） | ✅ | ✅ | ✅ |
 | 联网工具 | ✅ | ✅ | ✅ |
-| 读写本机文件 / 执行命令 | ✅ | ❌ | ❌ |
+| 读写本机文件 / 执行命令 | ✅ | ❌（群内管理员也没有） | ❌ |
 | 记忆卡 / 表情 / 日报 | ✅ | ✅ | 部分 |
 | 改权限 | 仅本机面板 | ❌ | ❌ |
 
@@ -82,7 +82,7 @@ Host 半边负责接入、判权、上下文、记忆、档案与工具；Client
 ## 开发
 
 ```powershell
-npm test           # 189 条单测
+npm test           # 191 条单测
 npm run smoke      # 真调 apply()，抓前置引用/缺服务
 npm run rehearse   # 端到端：解码→判权→上下文→卡片渲染→鉴权
 npm run inventory  # 文件、工具、命令、路由、配置键盘点
@@ -109,3 +109,4 @@ dev/       开发期辅助 bundle（不随插件发布）
 ## 许可
 
 代码 MIT，见 [LICENSE](LICENSE)。宠物动画等第三方素材的授权单独说明，见 [NOTICE.md](NOTICE.md)。
+

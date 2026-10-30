@@ -28,6 +28,8 @@ export function defaults() {
       httpUrl: 'http://127.0.0.1:3000',
       wsUrl: 'ws://127.0.0.1:3001',
       eventPath: '/',
+  /** Bot QQ number; 0 = learn from the first event, then pin it. */
+  botUin: 0,
       token: '',
       /** HTTP and WebSocket adapters may use different tokens (SnowLuma does). */
       httpToken: '',
@@ -102,6 +104,8 @@ export function defaults() {
       enabled: true,
       media: false,
       retentionDays: 30,
+  /** Media files age out faster than the rows that reference them. */
+  mediaRetentionDays: 7,
     },
     stickers: {
       /** Offer the sticker catalog to the model and allow sending. */
@@ -169,6 +173,8 @@ export const RANGES = {
   'output.fontSize': [14, 48],
   'output.width': [600, 2000],
   'archive.retentionDays': [0, 3650],
+  'archive.mediaRetentionDays': [0, 3650],
+  'connection.botUin': [0, 99999999999],
   'safety.confirmTtlMs': [10000, 600000],
 };
 
@@ -239,6 +245,7 @@ export function normalize(config) {
   }
   return config;
 }
+
 
 
 
