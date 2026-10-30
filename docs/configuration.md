@@ -18,6 +18,8 @@
 | `botUin` | `0` | `0 ~ 99999999999` |  |
 | `token` | `""`（空） | — | OneBot HTTP access token（设置页不显示） |
 | `httpToken` | `""`（空） | — | 桥面板的额外口令（可留空，面板已限本机同源） |
+| `tokenEnv` | `""`（空） | — |  |
+| `httpTokenEnv` | `""`（空） | — |  |
 | `autoStart` | `true` | — | DSH 启动时顺带拉起 SnowLuma |
 | `snowlumaDir` | `""`（空） | — | SnowLuma 安装目录；填了才能自动启动 |
 | `snowlumaWebui` | `http://127.0.0.1:5099` | — | SnowLuma 控制台地址，设置页的「打开控制台」用它 |
@@ -57,6 +59,7 @@
 | `cwd` | `""`（空） | — | 为 QQ 会话指定工作目录；空 = DSH 默认 |
 | `groupHistory` | `99` | `0 ~ 200` | 群聊每次注入的历史消息条数 |
 | `groupCharCap` | `6000` | `500 ~ 40000` | 注入群上下文的字数上限 |
+| `groupPrivacy` | `true` | — |  |
 
 ## memory
 

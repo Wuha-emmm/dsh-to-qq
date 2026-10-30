@@ -38,7 +38,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.50.1';
+const VERSION = '0.51.0';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -915,10 +915,12 @@ export function apply(ctx) {
         lastImageError === '' ? 'images ok' : `last image error: ${lastImageError}`,
         (() => {
           const speech = ctx.get('speechToText');
-          if (speech === undefined) return 'speech: service unavailable';
+          const fallback = config.voice?.command ?? '';
+          const voiceHint = fallback === '' ? 'QQ 原生转写 only' : 'QQ native + command fallback';
+          if (speech === undefined) return `speech: unavailable (${voiceHint})`;
           const snapshot = speech.snapshot();
           const providers = snapshot?.providers ?? [];
-          if (providers.length === 0) return 'speech: no provider installed';
+          if (providers.length === 0) return `speech: no provider (${voiceHint})`;
           const list = providers.map(provider => {
             const phase = provider.preparation?.phase ?? 'unknown';
             const step = provider.preparation?.step ?? '';
@@ -944,6 +946,7 @@ export function apply(ctx) {
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
 }
+
 
 
 

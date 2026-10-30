@@ -122,5 +122,26 @@
 3. `%USERPROFILE%\.dsh\dsh-to-qq\` 下 `config.json`（**先删掉 token**）
 4. DSH 启动日志里与 `dsh-to-qq` 相关的行
 
+## 语音只有 QQ 原生转写
 
+`qq_status` 里出现 `speech: unavailable (QQ 原生转写 only)` 表示：
 
+- 没有安装 Host 的 `speechToText` 提供方
+- 也没有配置 `voice.command`
+
+此时只有 QQ 自带的语音转文字可用（`fetch_ptt_text`）。想加本地兜底，二选一：
+
+| 方式 | 配置 |
+|---|---|
+| Host 语音服务 | 安装提供 `speechToText` 的插件，`voice.qqAsr: false` 可强制走它 |
+| 外部命令 | `voice.command`，例如 `whisper -f {input} -l {language} -otxt -of {output}` |
+
+状态行会显示当前生效的组合，不用猜。
+
+## 敏感词没拦住
+
+`access.blockedWords` 现在会扫描正文、引用、转发、语音转写与文件名，命中后静默丢弃并计入 `ignored`。如果仍看到漏网：
+
+1. 确认词没有多余空格（匹配是区分大小写的子串）
+2. 图片里的文字不会被 OCR，无法拦截
+3. 私聊管理员的消息同样受敏感词约束

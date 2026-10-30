@@ -33,6 +33,10 @@ export function defaults() {
       token: '',
       /** HTTP and WebSocket adapters may use different tokens (SnowLuma does). */
       httpToken: '',
+  /** Read the token from this environment variable instead of the config file. */
+  tokenEnv: '',
+  /** Environment variable for the HTTP token; falls back to tokenEnv. */
+  httpTokenEnv: '',
       /** Start SnowLuma on demand when nothing answers the HTTP endpoint. */
       autoStart: true,
       /** SnowLuma install directory; empty disables auto-start. */
@@ -65,6 +69,8 @@ export function defaults() {
       /** owner private chats are intentionally unbounded; shown locked in the UI. */
       groupHistory: 99,
       groupCharCap: 6000,
+  /** Tell the model not to repeat what other group members said. */
+  groupPrivacy: true,
     },
     memory: {
       summaryLimit: 1000,
@@ -245,6 +251,8 @@ export function normalize(config) {
   }
   return config;
 }
+
+
 
 
 

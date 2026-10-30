@@ -8,7 +8,7 @@
 
 import { OneBotClient } from '../transport/onebot.js';
 import { normalizeEvent, chunkText, flattenSegments } from './events.js';
-import { admit, tierOf } from '../policy/tiers.js';
+import { admit, blockedWord, tierOf } from '../policy/tiers.js';
 import { Quota, Semaphore } from '../policy/quota.js';
 import { SceneBuffer, renderContext } from '../context/buffer.js';
 import { renderCard } from '../memory/store.js';
@@ -40,6 +40,24 @@ const SEEN_LIMIT = 800;
 const CHUNK_LIMIT = 1500;
 
 /** Hard cap on buffered lines per scene, above every configured window. */
+/**
+ * Token literal, or the value of the configured environment variable.
+ *
+ * Keeping the secret in an environment variable means `config.json` holds a name
+ * instead of a value, so a copied config or a screenshot leaks nothing.
+ *
+ * @param {string} literal Inline token from the config.
+ * @param {string} envName Environment variable that holds the token.
+ * @returns {string} Resolved token, possibly empty.
+ */
+function resolveToken(literal, envName) {
+  const direct = String(literal ?? '').trim();
+  if (direct !== '') return direct;
+  const name = String(envName ?? '').trim();
+  if (name === '') return '';
+  return String(process.env[name] ?? '').trim();
+}
+
 const BUFFER_LIMIT = 200;
 
 /** What a throttled sender is told, per quota reason. */
@@ -362,8 +380,11 @@ export class Bridge {
       httpUrl: config.connection.httpUrl,
       wsUrl: config.connection.wsUrl,
       eventPath: config.connection.eventPath,
-      token: config.connection.token,
-      httpToken: config.connection.httpToken === '' ? config.connection.token : config.connection.httpToken,
+      token: resolveToken(config.connection.token, config.connection.tokenEnv),
+      httpToken: resolveToken(
+        config.connection.httpToken === '' ? config.connection.token : config.connection.httpToken,
+        config.connection.httpTokenEnv === '' ? config.connection.tokenEnv : config.connection.httpTokenEnv,
+      ),
       reconnect: config.connection.reconnect,
       onEvent: event => {
         void this.handle(event);
@@ -1092,6 +1113,15 @@ export class Bridge {
       // Sticker catalog: only when the tool is available for this tier.
       const stickerNote = this.stickerBlock(message.scene);
       const text = `${promptText}${imageNote}${voiceNote}${fileNote}${forwardNote}${stickerNote}${nudge}`;
+      // The body was checked at admission; the quote, forward, transcript and
+      // file names only exist now, so scan the assembled prompt as well.
+      const hit = blockedWord(text, config);
+      if (hit !== '') {
+        this.counters.ignored += 1;
+        this.log(`blocked word in merged content for ${message.scene}: ${hit}`);
+        return;
+      }
+
       const cardsBefore = this.cardsSent;
       const result = await this.driver.ask({
         scene: message.scene,
@@ -1323,8 +1353,13 @@ export class Bridge {
       quoted,
       maxChars: config.conversation.groupCharCap,
     });
+    // Everyone in a group shares one session, so the window also contains what
+    // other members said. Use it to understand the conversation, not to report it.
+    const privacy = config.conversation.groupPrivacy === false
+      ? ''
+      : '【群聊规则】上下文里其他成员的消息只用于理解你们在聊什么，不要复述、总结、转述或引用其中任何一句；被问到“别人说了什么”时，只回答你自己看到的本轮内容。';
     const ask = `【当前提问】${message.senderName}(${message.senderId}): ${message.text === '' ? '（非文本消息）' : message.text}`;
-    const parts = [card, block, ask].filter(part => part !== '');
+    const parts = [card, block, privacy, ask].filter(part => part !== '');
     return parts.join('\n\n');
   }
 

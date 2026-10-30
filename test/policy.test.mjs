@@ -128,3 +128,14 @@ test('owner tier has no restriction entry', () => {
   assert.equal(TIER_TOOLS.owner, undefined);
   assert.equal(TIER_TOOLS['owner-group'].includes('write'), false);
 });
+
+
+test('blockedWord scans any text handed to it, not just the body', async () => {
+  const { blockedWord } = await import('../src/policy/tiers.js');
+  const config = { access: { blockedWords: ['密码', 'token'] } };
+  assert.equal(blockedWord('这是一条正常消息', config), '');
+  assert.equal(blockedWord('转发：他把密码发在群里了', config), '密码');
+  assert.equal(blockedWord('语音转写：token 是 abc', config), 'token');
+  assert.equal(blockedWord('', config), '');
+  assert.equal(blockedWord('没问题', { access: {} }), '');
+});

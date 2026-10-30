@@ -543,6 +543,7 @@ window.__ModuleLoader__.load({
           { path: 'connection.eventPath', label: '事件路径', type: 'text', placeholder: '/' },
           { path: 'connection.snowlumaDir', label: 'SnowLuma 目录', type: 'text', placeholder: 'D:\\SnowLuma' },
           { path: 'connection.botUin', label: '机器人 QQ 号（0 = 自动识别）', type: 'number' },
+          { path: 'connection.tokenEnv', label: 'token 环境变量名', type: 'text', placeholder: 'QQ_BOT_TOKEN' },
           { path: 'connection.autoStart', label: '自动启动 SnowLuma', type: 'checkbox' },
           { path: 'ui.pet', label: '与 dsh-pet 联动', type: 'checkbox' },
           { path: 'ui.petId', label: '宠物 id', type: 'text', placeholder: 'main' },
@@ -764,6 +765,7 @@ window.__ModuleLoader__.load({
       'archive.retentionDays': '档案保留天数，0 = 永久',
       'archive.mediaRetentionDays': '图片/语音/文件保留天数，通常比档案短',
       'connection.botUin': '填了就只接受这个号的事件；0 = 从第一条事件学习后锁定',
+      'connection.tokenEnv': '把 token 放进这个环境变量，config.json 里就不留明文（重启生效）',
       'archive.media': '把收到的图片/转发图存到本地',
     };
 
@@ -1240,7 +1242,7 @@ const StickerBoard = () => {
         h('div', { style: { ...UI.muted, paddingTop: 8 } },
           config.connection.tokenSet
             ? 'OneBot token 已配置（出于安全不在界面显示）'
-            : 'OneBot token 未配置：请在配置文件里填写后重启'));
+            : 'OneBot token 未配置：填 config.json，或设置环境变量名后重启'));
 
       const content = active.group !== undefined
         ? [

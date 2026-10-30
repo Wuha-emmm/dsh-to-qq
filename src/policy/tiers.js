@@ -30,14 +30,33 @@ export function tierOf(message, access) {
  * @param {import('../config/defaults.js').QQConfig} config Full configuration.
  * @returns {{ accepted: boolean, reason?: string }} The decision.
  */
+/**
+ * First blocked word contained in a text, or an empty string.
+ *
+ * Used for the message body and for everything merged into the prompt later
+ * (quote, forward, voice transcript, file names): a word filter that only reads
+ * `message.text` lets every attachment through.
+ *
+ * @param {string} text Text to scan.
+ * @param {any} config Live configuration.
+ * @returns {string} The matched word, or ''.
+ */
+export function blockedWord(text, config) {
+  const words = Array.isArray(config?.access?.blockedWords) ? config.access.blockedWords : [];
+  const body = String(text ?? '');
+  if (body === '') return '';
+  for (const word of words) {
+    if (typeof word !== 'string' || word === '') continue;
+    if (body.includes(word)) return word;
+  }
+  return '';
+}
+
 export function admit(message, config) {
   const access = config.access;
   const isAdmin = access.admins.some(admin => admin.qq === message.senderId);
 
-  const blocked = Array.isArray(access.blockedWords) ? access.blockedWords : [];
-  if (blocked.some(word => word !== '' && message.text.includes(word))) {
-    return { accepted: false, reason: 'blocked-word' };
-  }
+  if (blockedWord(message.text, config) !== '') return { accepted: false, reason: 'blocked-word' };
 
   if (message.kind === 'dm') {
     if (isAdmin) return { accepted: true };

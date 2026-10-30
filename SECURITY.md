@@ -56,3 +56,14 @@ git grep -nE "token|@qq\.com|C:\\\\Users\\\\|/home/|[0-9]{8,11}"
 现有缓解：只连回环、插件**固定机器人账号**（`connection.botUin` 或首条事件学习），`self_id` 不符的事件直接丢弃；危险工具需要 `/yes` 且**只批那一条调用**（参数签名一致）。
 
 无法在插件层根治的部分：同一台机器上已有更高权限的进程时，它可以做任何事。所以管理员号不要对外公开，机器本身要保持干净。
+
+## 把 token 从 config.json 里挪走
+
+`config.json` 是明文。更安全的做法是设置 `connection.tokenEnv`（和 `connection.httpTokenEnv`）为环境变量名，让配置里只有名字：
+
+```powershell
+setx QQ_BOT_TOKEN "你的 OneBot token"
+# 设置 → 连接 → token 环境变量名 填 QQ_BOT_TOKEN，重启 DSH
+```
+
+这样复制配置、截图、备份都不会带出密钥。缺点：DSH 必须能读到这个环境变量（从桌面图标启动时通常可以）。
