@@ -31,15 +31,18 @@
 - 主动提醒、TTS 发语音
 - 向量检索（当前是关键词 `LIKE`）
 
-## 快速开始
+## 一键部署
+
+双击仓库根目录的 **`setup.cmd`**：它自动找 DSH 自带的 Node、打包插件、检查 SnowLuma，并把一段安装指令复制到剪贴板。把那段话粘给 DSH，装完重启即可。
 
 ```powershell
-pnpm pack --pack-destination dist
-# 在 DSH 里：plugin_manager install_bundle → file:///<绝对路径>/dist/dsh-to-qq-<版本>.tgz
-# 重启 DSH，打开 设置 → QQ 桥接
+# 等价命令
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
 ```
 
-完整步骤（包含 SnowLuma 安装、QQ 小号、token 填写）见 **[部署指南](docs/deploy.md)**。
+最后一步（写 profile 与 Cordis 补丁）必须由 DSH 的插件管理器执行，所以脚本给的是"可粘贴指令"而不是硬改 profile——详见 **[安装说明](docs/install.md)**。
+
+完整步骤（SnowLuma 安装、QQ 小号、token 填写）见 **[部署指南](docs/deploy.md)**。
 
 ## 依赖
 
@@ -64,7 +67,8 @@ pnpm pack --pack-destination dist
 | `docs/` | [部署](docs/deploy.md)、[配置参考](docs/configuration.md)、[表情包库](docs/stickers.md)、[SnowLuma 备忘](docs/snowluma.md)、[架构](docs/architecture.md)、[权限模型](docs/permission-model.md)、[排障](docs/troubleshooting.md)、[路线](docs/roadmap.md) |
 | `scripts/` | `smoke`（真跑 apply）、`inventory`（静态盘点）、`rehearse`（端到端预演）、`docs-config`（生成配置参考） |
 | `test/` | `node:test`，零依赖 |
-| `dev/` | 开发期辅助 bundle（不随插件发布） |
+| dev/ | 开发期辅助 bundle（不随插件发布） |
+| setup.cmd / scripts/setup.ps1 | 一键准备：找 Node、打包、检查 SnowLuma、生成安装指令 |
 
 ## 自检
 
@@ -87,3 +91,5 @@ npm run docs:check # 配置参考是否过期
 ## 许可
 
 MIT。见 [LICENSE](LICENSE) 与 [NOTICE.md](NOTICE.md)。
+
+

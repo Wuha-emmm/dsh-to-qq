@@ -18,6 +18,7 @@
     "locale/*.json",
     "icon.svg",
     "README.md",
+    "docs/install.md",
     "docs/deploy.md",
     "docs/configuration.md",
     "docs/troubleshooting.md",
@@ -56,4 +57,5 @@
   ],
   "license": "MIT"
 }
+
 

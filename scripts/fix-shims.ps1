@@ -11,8 +11,17 @@
 # Usage: pwsh -File scripts\fix-shims.ps1 [-ProfileNodeModules <path>]
 
 param(
-  [string]$ProfileNodeModules = 'E:\Open\DSH-plugin\profiles\desktop\node_modules'
+  [string]$ProfileNodeModules = ''
 )
+
+if ($ProfileNodeModules -eq '') {
+  $profileDir = $env:DSH_PROFILE_DIR
+  if (-not $profileDir) {
+    $name = if ($env:DSH_PROFILE) { $env:DSH_PROFILE } else { 'desktop' }
+    $profileDir = Join-Path (Join-Path $env:USERPROFILE '.dsh\profiles') $name
+  }
+  $ProfileNodeModules = Join-Path $profileDir 'node_modules'
+}
 
 $ErrorActionPreference = 'Stop'
 $base = Join-Path $ProfileNodeModules '@deepseek-ai'
