@@ -102,7 +102,7 @@ if ($SnowLumaDir -eq '') {
   $guess = @('D:\SnowLuma', 'E:\SnowLuma', (Join-Path $env:USERPROFILE 'SnowLuma'))
   $SnowLumaDir = $guess | Where-Object { Test-Path $_ } | Select-Object -First 1
 }
-# 驱动器根目录下找一层，SnowLuma 常被解压到 E:\Open\SnowLuma 这类自建目录
+# 驱动器根目录下找一层，SnowLuma 常被解压到某个自建目录里（例如 D:\QQ\SnowLuma）
 if ($SnowLumaDir -eq '') {
   foreach ($drive in @('C:\', 'D:\', 'E:\', 'F:\')) {
     if (-not (Test-Path $drive)) { continue }
