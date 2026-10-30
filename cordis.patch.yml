@@ -1,0 +1,6 @@
+# dsh-to-qq bundle patch
+- insert:
+    - id: dsh-to-qq
+      name: dsh-to-qq
+      # config 有意留空：运行时配置写在插件自有 config.json（设置页维护），
+      # 不走 Cordis Config，避免依赖 profile 里解析不到的 @deepseek-ai/schemastery。

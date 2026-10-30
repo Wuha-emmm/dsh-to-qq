@@ -1,0 +1,7 @@
+# Compatibility bundle: pulls @deepseek-ai host packages into the profile so that
+# profile-installed plugins which import them (for example dsh-pet) can resolve
+# them. The row itself does nothing.
+
+- insert:
+    - id: dsh-to-qq-compat
+      name: dsh-to-qq-compat

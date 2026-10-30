@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Probe">
+  <rect x="4" y="4" width="56" height="56" rx="16" fill="#0f766e"/>
+  <path d="M20 42l8-8 6 6 10-12" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="44" cy="22" r="4" fill="#5eead4"/>
+</svg>

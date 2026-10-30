@@ -1,0 +1,59 @@
+{
+  "name": "dsh-to-qq",
+  "version": "0.49.1",
+
+  "description": "QQ <-> DeepSeek Harness bridge: chat with your local DSH from a QQ account through SnowLuma/OneBot",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./client": "./client/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "src",
+    "client",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "docs/deploy.md",
+    "docs/configuration.md",
+    "docs/troubleshooting.md",
+    "docs/stickers.md",
+    "docs/architecture.md",
+    "docs/permission-model.md",
+    "NOTICE.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\"",
+    "smoke": "node scripts/smoke.mjs",
+    "inventory": "node scripts/inventory.mjs",
+    "rehearse": "node scripts/rehearse.mjs",
+    "docs": "node scripts/docs-config.mjs",
+    "docs:check": "node scripts/docs-config.mjs --check"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "qq",
+    "onebot",
+    "snowluma",
+    "chatbot",
+    "bridge"
+  ],
+  "license": "MIT"
+}
+

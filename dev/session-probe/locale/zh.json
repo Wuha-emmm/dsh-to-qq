@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "会话驱动器探针",
+    "description": "临时诊断工具：验证 Host 插件能否在进程内直接调用 sessionController。"
+  }
+}

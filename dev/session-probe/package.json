@@ -1,0 +1,17 @@
+{
+  "name": "@local/dsh-qq-probe",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Diagnostic: can a Host plugin call ctx.sessionController in process?",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": ["index.js", "cordis.patch.yml", "locale/*.json", "icon.svg"],
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" }
+  }
+}

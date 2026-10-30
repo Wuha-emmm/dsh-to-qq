@@ -1,0 +1,44 @@
+# 隐私与安全
+
+这个插件会接触真实聊天记录，**配置里还有 OneBot token**。提交代码或分享目录前，请确认下面这些不在仓库里。
+
+## 绝对不能提交的内容
+
+| 文件 / 内容 | 位置 | 说明 |
+|---|---|---|
+| `config.json` | `~/.dsh/dsh-to-qq/`（Windows：`%USERPROFILE%\.dsh\dsh-to-qq\`） | 含 OneBot **明文 token**、管理员 QQ、群号 |
+| `archive.db` | 同上 | 真实聊天记录 |
+| `memory.json` | 同上 | 人设、印象、对方说过的话 |
+| `stickers.json` | 同上 | 收藏表情的 md5 与描述 |
+| `media/` | 同上 | 收发的图片、语音、文件 |
+| `sessions.json` / `guests.json` | 同上 | 会话绑定信息 |
+| 运行日志 | 仓库 `logs/`、`*.log` | 可能含原始消息 |
+
+本仓库的 `.gitignore` 已覆盖 `dist/`、`logs/`、`archive/`、`*.tgz`、`*.log`；状态目录在仓库之外，正常不会误传。
+
+## 提交前自检
+
+```powershell
+# 1) 确认没有状态文件混进来
+git status --short
+
+# 2) 搜一遍常见的个人数据（QQ 号、群号、本机路径、昵称）
+git grep -nE "token|@qq\.com|C:\\\\Users\\\\|/home/|[0-9]{8,11}"
+```
+
+仓库里的示例统一使用占位值：QQ `10001` / `10002`、群 `20001` / `20002`、昵称「小明」、SnowLuma 目录 `D:\SnowLuma`。
+
+## 泄露了怎么办
+
+1. 立刻在 SnowLuma 里**重置 OneBot token**（HTTP 与 WS 各一个）
+2. 修改管理员名单，必要时换机器人小号
+3. 从仓库历史里清除该文件：`git filter-repo --invert-paths --path <file>`，然后强推
+4. 记住：GitHub 上的历史提交即使用 `git rm` 也仍然可见
+
+## 权限提醒
+
+本插件默认把**管理员私聊**当作本机完全控制（可执行命令、读写文件）。管理员 QQ 号被冒用等于本机被控。建议：
+
+- 机器人用小号，管理员用一个不对外公开的号
+- 群聊保持只读（默认策略）
+- 不要把 `config.json` 或包含 token 的截图发到群里

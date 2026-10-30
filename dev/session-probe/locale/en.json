@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "DSH to QQ Session Probe",
+    "description": "Temporary diagnostic that reports whether a Host plugin can call sessionController in process."
+  }
+}

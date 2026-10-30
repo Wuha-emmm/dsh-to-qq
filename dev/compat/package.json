@@ -1,0 +1,17 @@
+{
+  "name": "dsh-to-qq-compat",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Installs the @deepseek-ai host packages that profile-installed plugins (dsh-pet) import, so they resolve from the profile's node_modules.",
+  "type": "module",
+  "main": "index.js",
+  "dependencies": {
+    "@deepseek-ai/cordis": "^4.0.5",
+    "@deepseek-ai/dsh-home-paths": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-credentials": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.5"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" }
+  }
+}
