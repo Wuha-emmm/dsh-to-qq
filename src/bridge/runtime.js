@@ -353,6 +353,8 @@ export class Bridge {
     this.senders = new Map();
     /** Session -> { qq, scene, tier }, so qq_send answers in the right place. */
     this.sessionDetails = new Map();
+    /** Bot account; 0 until the first event (or connection.botUin) pins it. */
+    this.selfId = 0;
     /** Sessions already renamed in this process. */
     this.titledSessions = new Set();
     /** group id -> display name, so a title costs one call. */
@@ -866,6 +868,7 @@ export class Bridge {
    * @returns {Promise<void>} Resolves after the event is fully handled.
    */
   async handle(event) {
+    const config = this.store.get();
     this.counters.events += 1;
     const message = normalizeEvent(event);
     if (message === undefined) return;
@@ -921,7 +924,6 @@ export class Bridge {
     }
     this.#remember(message.key);
 
-    const config = this.store.get();
     const decision = admit(message, config);
     if (decision.accepted !== true) {
       this.counters.ignored += 1;
