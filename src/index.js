@@ -38,7 +38,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.51.2';
+const VERSION = '0.52.0';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -911,6 +911,7 @@ export function apply(ctx) {
         `ignored ${snapshot.counters.ignored} throttled ${snapshot.counters.throttled} answered ${snapshot.counters.answered} failed ${snapshot.counters.failed} errors ${snapshot.counters.errors}`,
         `quota day ${bridge.quota.snapshot().day} senders ${bridge.quota.snapshot().senders} scenes ${bridge.quota.snapshot().scenes}${bridge.quota.dirty ? " (unsaved)" : ""}`,
         `bot ${bridge.selfId === 0 ? "(unknown)" : bridge.selfId}${bridge.selfId === 0 ? "" : " (pinned)"}`,
+        `context last ${bridge.contextStats?.chars ?? 0} chars (saved ${bridge.contextStats?.skipped ?? 0})`,
         `config ${store.file}`,
         lastImageError === '' ? 'images ok' : `last image error: ${lastImageError}`,
         (() => {
@@ -946,6 +947,7 @@ export function apply(ctx) {
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
 }
+
 
 
 

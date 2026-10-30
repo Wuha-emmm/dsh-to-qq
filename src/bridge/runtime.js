@@ -11,6 +11,7 @@ import { normalizeEvent, chunkText, flattenSegments } from './events.js';
 import { admit, blockedWord, tierOf } from '../policy/tiers.js';
 import { Quota, Semaphore } from '../policy/quota.js';
 import { SceneBuffer, renderContext } from '../context/buffer.js';
+import { InjectionTracker } from '../context/injection.js';
 import { renderCard } from '../memory/store.js';
 import { renderTextImageBase64 } from '../render/text-image.js';
 import { promptImageParts, persistImage, imageSegments, looksLikeSticker, downloadImage } from '../media/inbound.js';
@@ -258,7 +259,7 @@ export class Bridge {
     return `file:///${path.replace(/^\/+/, '')}`;
   }
 
-  stickerBlock(scene) {
+  stickerBlock(scene, injection) {
     if (this.stickers === undefined) return '';
     const config = this.store.get();
     if (config.stickers?.enabled === false) return '';
@@ -266,7 +267,8 @@ export class Bridge {
     const block = renderStickerBlock(this.stickers.all(), { limit, muted: this.stickers.isMuted(scene) });
     const faces = renderFaceList();
     const parts = [block, faces].filter(part => part !== '');
-    return parts.length === 0 ? '' : `\n\n${parts.join('\n')}`;
+    if (parts.length === 0) return '';
+    return injection.fixed('stickers', `\n\n${parts.join('\n')}`);
   }
 
   /**
@@ -355,6 +357,8 @@ export class Bridge {
     this.sessionDetails = new Map();
     /** Bot account; 0 until the first event (or connection.botUin) pins it. */
     this.selfId = 0;
+    /** Per-scene injection state: which fixed blocks the session already has. */
+    this.injections = new Map();
     /** Sessions already renamed in this process. */
     this.titledSessions = new Set();
     /** group id -> display name, so a title costs one call. */
@@ -1016,14 +1020,15 @@ export class Bridge {
       void this.pet?.say(`${message.senderName}：${message.text.slice(0, 40)}`);
       void this.pet?.workStatus('working', `${message.scene}`);
       if (tier !== 'owner') await this.#maybeBackfill(message);
-      const card = this.#cardBlock(message);
+      const injection = this.#injectionFor(message.scene);
+      const card = this.#cardBlock(message, injection);
       const { parts: images, originals, sheets } = await promptImageParts(message.segments, this.log);
       const savedPaths = [];
       const quoted = await this.#resolveQuote(message);
       const quotedText = quoted?.text;
       const promptText = tier === 'owner'
         ? this.#privatePrompt(message, config, card, quotedText)
-        : this.#groupPrompt(message, config, card, quotedText);
+        : this.#groupPrompt(message, config, card, quotedText, injection);
       const stickers = imageSegments(message.segments).filter(looksLikeSticker).length;
       // Voice: QQ's own ASR first, then a local speech provider, then a command.
       const voices = voiceSegments(message.segments);
@@ -1119,8 +1124,12 @@ export class Bridge {
       this.turnCounts.set(message.senderId, turnNumber);
       const nudge = dueForAutoNote(turnNumber, config.memory.autoNoteEvery) ? autoNotePrompt() : '';
       // Sticker catalog: only when the tool is available for this tier.
-      const stickerNote = this.stickerBlock(message.scene);
+      const stickerNote = this.stickerBlock(message.scene, injection);
       const text = `${promptText}${imageNote}${voiceNote}${fileNote}${forwardNote}${stickerNote}${nudge}`;
+      this.contextStats = { chars: text.length, ...injection.stats };
+      if (injection.skipped > 0) {
+        this.log(`context ${message.scene}: sent ${text.length} chars, skipped ${injection.skipped}`);
+      }
       // The body was checked at admission; the quote, forward, transcript and
       // file names only exist now, so scan the assembled prompt as well.
       const hit = blockedWord(text, config);
@@ -1139,6 +1148,8 @@ export class Bridge {
         timeoutMs: config.limits.turnTimeoutMs,
         tier,
         onSession: sessionId => {
+          const tracker = this.injections.get(message.scene);
+          if (tracker !== undefined) tracker.sessionId = String(sessionId);
           this.senders.set(sessionId, message.senderId);
           this.sessionDetails.set(sessionId, { qq: message.senderId, scene: message.scene, tier });
           // While this turn runs, watch for questions the Host is waiting on.
@@ -1221,10 +1232,33 @@ export class Bridge {
    * @param {import('./events.js').QQMessage} message The message.
    * @returns {string} The block, or an empty string when the card is empty.
    */
-  #cardBlock(message) {
+  /**
+   * Injection state for one scene; a new session starts from scratch.
+   *
+   * @param {string} scene Scene key.
+   * @returns {InjectionTracker} Tracker for this scene.
+   */
+  #injectionFor(scene) {
+    // /新建 or a lost session replaces the binding; the new session has not seen
+    // any block yet, so drop the old tracker.
+    const bound = String(this.map?.get?.(scene) ?? '');
+    const existing = this.injections.get(scene);
+    if (existing !== undefined && existing.sessionId !== bound) {
+      this.injections.delete(scene);
+    }
+    if (existing !== undefined) return existing;
+    const fresh = new InjectionTracker();
+    fresh.sessionId = String(this.map?.get?.(scene) ?? '');
+    // The binding may only appear after this turn creates the session; record it
+    // lazily so the first turn's blocks are not re-sent next time.
+    this.injections.set(scene, fresh);
+    return fresh;
+  }
+
+  #cardBlock(message, injection) {
     if (this.memory === undefined) return '';
     const card = this.memory.get(message.senderId);
-    return renderCard({ card, name: message.senderName, qq: message.senderId });
+    return injection.fixed('card', renderCard({ card, name: message.senderName, qq: message.senderId }));
   }
 
   /**
@@ -1351,9 +1385,11 @@ export class Bridge {
    * @param {import('../config/defaults.js').QQConfig} config Live configuration.
    * @returns {string} Prompt text.
    */
-  #groupPrompt(message, config, card = '', quotedText) {
+  #groupPrompt(message, config, card = '', quotedText, injection) {
     const window = Math.max(1, config.conversation.groupHistory);
-    const entries = this.buffer.recent(message.scene, window + 1).slice(0, -1);
+    // The session already holds what earlier turns injected, so only messages
+    // that appeared since then are worth sending again.
+    const entries = injection.delta(this.buffer.recent(message.scene, window + 1).slice(0, -1));
     const cached = message.replyTo === undefined ? undefined : this.buffer.find(message.scene, message.replyTo);
     const quoted = quotedText ?? (cached === undefined ? undefined : `${cached.senderName}: ${cached.text}`);
     const block = renderContext({
@@ -1365,7 +1401,7 @@ export class Bridge {
     // other members said. Use it to understand the conversation, not to report it.
     const privacy = config.conversation.groupPrivacy === false
       ? ''
-      : '【群聊规则】上下文里其他成员的消息只用于理解你们在聊什么，不要复述、总结、转述或引用其中任何一句；被问到“别人说了什么”时，只回答你自己看到的本轮内容。';
+      : injection.fixed('rules', '【群聊规则】上下文里其他成员的消息只用于理解你们在聊什么，不要复述、总结、转述或引用其中任何一句；被问到“别人说了什么”时，只回答你自己看到的本轮内容。');
     const ask = `【当前提问】${message.senderName}(${message.senderId}): ${message.text === '' ? '（非文本消息）' : message.text}`;
     const parts = [card, block, privacy, ask].filter(part => part !== '');
     return parts.join('\n\n');
