@@ -58,3 +58,9 @@ test('normalize leaves a valid config untouched', () => {
   assert.deepEqual(twice, once);
 });
 
+test('the approval window is configurable and stays inside sane bounds', () => {
+  const base = normalize(defaults());
+  assert.equal(base.safety.toolGrantMinutes, 15);
+  assert.equal(normalize({ ...base, safety: { ...base.safety, toolGrantMinutes: 30 } }).safety.toolGrantMinutes, 30);
+  assert.equal(normalize({ ...base, safety: { ...base.safety, toolGrantMinutes: 999 } }).safety.toolGrantMinutes, 120);
+});

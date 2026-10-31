@@ -1068,8 +1068,9 @@ export class Bridge {
       const casual = looksLikeApproval(answer);
       const pending = this.approvals?.pendingOf(message.scene);
       if (allowAll) {
-        const granted = this.approvals.grantTools(message.scene, ['pwsh', 'edit', 'write', 'plugin_manager'], 5 * 60_000);
-        await this.sendText(message, `已放行全部工具 5 分钟（${granted.tools.join('、')}），正在继续刚才的操作…`);
+        const minutes = Math.max(1, Number(this.store.get().safety.toolGrantMinutes) || 15);
+        const granted = this.approvals.grantTools(message.scene, ['pwsh', 'edit', 'write', 'plugin_manager'], minutes * 60_000);
+        await this.sendText(message, `已放行全部工具 ${minutes} 分钟（${granted.tools.join('、')}），正在继续刚才的操作…`);
         await this.#resumeAfterApproval(message, '所有危险工具已放行 5 分钟');
         return;
       }
@@ -1079,8 +1080,8 @@ export class Bridge {
           await this.sendText(message, '先让它试一次，出现「需要管理员确认」之后再发 /yes!。');
           return;
         }
-        this.approvals.grantTool(message.scene, tool, 5 * 60_000);
-        await this.sendText(message, `已放行 ${tool} 5 分钟，正在继续刚才的操作…（要多工具一起放行就发 /全放行）`);
+        this.approvals.grantTool(message.scene, tool, Math.max(1, Number(this.store.get().safety.toolGrantMinutes) || 15) * 60_000);
+        await this.sendText(message, `已放行 ${tool} ${Math.max(1, Number(this.store.get().safety.toolGrantMinutes) || 15)} 分钟，正在继续刚才的操作…（要多工具一起放行就发 /全放行）`);
         await this.#resumeAfterApproval(message, '该工具已放行 5 分钟');
         return;
       }
@@ -1292,7 +1293,7 @@ export class Bridge {
         : Number(config.output.replyCharsGroup) || 0;
       const lengthLimit = tierLimit > 0 ? tierLimit : baseLimit;
       const lengthNote = lengthLimit > 0
-        ? injection.fixed('length', `【回复长度】尽量控制在 ${lengthLimit} 字以内；内容较长时正常输出，我会自动转成图片发出去。【B站视频】要说明某个 B站视频讲了什么时，先调 bilibili 工具的 subtitle 动作读字幕（登录态已就绪）；拿不到字幕再用 web_fetch，别先下结论说看不到。【日报】要出日报就直接调 group_digest（day 传 today / yesterday / 前天 / YYYY-MM-DD），它两秒出图；不要用 qq_history 自己翻记录统计，那样要好几分钟。`)
+        ? injection.fixed('length', `【回复长度】尽量控制在 ${lengthLimit} 字以内；内容较长时正常输出，我会自动转成图片发出去。【B站视频】要说明某个 B站视频讲了什么时，先调 bilibili 工具的 subtitle 动作读字幕（登录态已就绪）；拿不到字幕再用 web_fetch，别先下结论说看不到。【日报】要出日报就直接调 group_digest（day 传 today / yesterday / 前天 / YYYY-MM-DD），它两秒出图；不要用 qq_history 自己翻记录统计，那样要好几分钟。【别重复】长任务执行中只报一次进度；同一句话不要发第二遍；被授权拦住时只说"需要放行 X"，不要重述整段计划。授权一次默认 15 分钟内有效，够你把这事做完。`)
         : '';
       const bodyText = `${promptBase}${imageNote}${voiceNote}${fileNote}${forwardNote}${stickerNote}${lengthNote}${nudge}`;
       const text = seed === undefined ? bodyText : `${seed}\n\n${bodyText}`;

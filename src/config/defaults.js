@@ -184,6 +184,8 @@ export function defaults() {
     safety: {
       confirmWrite: true,
       confirmTtlMs: 180_000,
+      /** How long `/yes!` and `/全放行` keep a tool open; long tasks need more than five minutes. */
+      toolGrantMinutes: 15,
       audit: true,
     },
     ui: {
@@ -226,6 +228,7 @@ export const RANGES = {
   'archive.mediaRetentionDays': [0, 3650],
   'connection.botUin': [0, 99999999999],
   'safety.confirmTtlMs': [10_000, 600_000],
+  'safety.toolGrantMinutes': [1, 120],
   'models.inputPrice': [0, 1000],
   'models.outputPrice': [0, 1000],
   'accounts.debugPort': [1024, 65535],

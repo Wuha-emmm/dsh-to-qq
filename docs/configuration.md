@@ -169,6 +169,7 @@
 |---|---|---|---|
 | `confirmWrite` | `true` | — | 危险工具需要 QQ 里 `/yes` 确认 |
 | `confirmTtlMs` | `180000` | `10000 ~ 600000` | 确认的有效期 |
+| `toolGrantMinutes` | `15` | `1 ~ 120` |  |
 | `audit` | `true` | — | 记录审计事件 |
 
 ## ui
