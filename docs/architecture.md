@@ -173,10 +173,13 @@ cookie 存在状态目录的 `accounts.json`（不写进 `config.json`，面板�
 | `open` | DevTools `Target.createTarget` | 在你自己的登录窗口里打开页面 |
 | `comment` | `x/v2/reply/add` + `csrf`（`bili_jct`） | 需要视频 aid；`mention` 传 uid 才会 @ 对人 |
 | `dynamic` | `x/dynamic/feed/create/dyn`（WBI + csrf） | 纯文字动态 |
-| `history` | `x/v2/history/report`（先取 cid） | B站返回 OK，但是否出现在观看记录里要等真实播放 |
+| `history` | `x/v2/history/report`（先取 cid） | 只上报，不保证进观看记录 |
+| `watch` | 打开页面 + DevTools 驱动静音播放 12 秒 + 上报 | 真实播放才会让 B站 记观看历史（前提是账号开着「记录我的浏览历史」） |
 
 WBI 签名：从 `nav` 取 `wbi_img` 两个 key，按固定置换表混成 32 位 key，再把参数排序拼接后 `md5(query + key)` 得到 `w_rid`。
 
 @ 的真实规则：B站 只认**昵称完全匹配**，纯文本 `@呜哈` 会链到**同名用户**（实测确实链到了另一个叫「呜哈」的账号）。所以 `comment` 的 `mention` 参数要传 uid，工具先查 `x/space/wbi/acc/info` 拿到准确昵称再拼进正文，发完用评论的 `content.members` 核对指向的 mid。
+
+实测：光是发评论（纯 API）不会打开页面，也不进任何记录；`x/v2/history` 一直是 0 条，即便在窗口里播放了 14 秒也没出现——最可能是账号设置里关掉了「记录我的浏览历史」，插件读不到那个开关。
 
 **只有管理员能用**（不在任何群的工具白名单里）。B站风控可能拒绝写入并回 `-412`，工具会把这个原始原因带回给模型，不做美化。

@@ -86,11 +86,12 @@ export async function devtoolsEndpoint(port, fetchImpl = fetch) {
  * @param {number} id Command id.
  * @param {string} method DevTools method.
  * @param {Record<string, unknown>} [params] Method parameters.
+ * @param {number} [timeoutMs] How long the command may take.
  * @returns {Promise<any>} The `result` field.
  */
-function command(socket, id, method, params = {}) {
+function command(socket, id, method, params = {}, timeoutMs = 8000) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${method} timeout`)), 8000);
+    const timer = setTimeout(() => reject(new Error(`${method} timeout`)), timeoutMs);
     const onMessage = event => {
       let payload;
       try {
@@ -133,6 +134,84 @@ export async function openUrl(port, url, options = {}) {
     return false;
   } finally {
     socket.close();
+  }
+}
+
+/**
+ * List the pages a running sign-in browser has open.
+ *
+ * @param {number} port Debug port.
+ * @param {typeof fetch} [fetchImpl] Fetch implementation.
+ * @returns {Promise<Array<{ url: string, socket: string }>>} Page targets.
+ */
+export async function listPages(port, fetchImpl = fetch) {
+  try {
+    const response = await fetchImpl(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(3000) });
+    const payload = await response.json();
+    return (Array.isArray(payload) ? payload : [])
+      .filter(page => page?.type === 'page' && typeof page.webSocketDebuggerUrl === 'string')
+      .map(page => ({ url: String(page.url ?? ''), socket: String(page.webSocketDebuggerUrl) }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Run a script inside one page of the sign-in browser.
+ *
+ * @param {string} socket Page DevTools socket.
+ * @param {string} expression JavaScript source; its value is returned.
+ * @param {{ WebSocketImpl?: typeof WebSocket, timeoutMs?: number }} [options] Wiring.
+ * @returns {Promise<any>} Script result.
+ */
+export async function evaluateInPage(socket, expression, options = {}) {
+  const WebSocketImpl = options.WebSocketImpl ?? WebSocket;
+  const ws = new WebSocketImpl(socket);
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('devtools 连接超时')), 5000);
+    ws.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
+    ws.addEventListener('error', () => { clearTimeout(timer); reject(new Error('devtools 连接失败')); }, { once: true });
+  });
+  try {
+    const result = await command(ws, 1, 'Runtime.evaluate', {
+      expression,
+      awaitPromise: true,
+      returnByValue: true,
+    }, options.timeoutMs ?? 30_000);
+    return result?.result?.value;
+  } finally {
+    ws.close();
+  }
+}
+
+/**
+ * Find the open page for a video and play it muted for a while.
+ *
+ * Bilibili only writes a watch-history entry once playback reports progress, so a
+ * short muted play is the honest way to make the visit real.
+ *
+ * @param {number} port Debug port.
+ * @param {string} bvid Video id to look for.
+ * @param {number} [seconds] How long to play.
+ * @returns {Promise<string>} What happened: 'played', 'no-page', 'no-video', or an error.
+ */
+export async function playInBrowser(port, bvid, seconds = 12) {
+  const pages = await listPages(port);
+  const page = pages.find(item => item.url.includes(bvid));
+  if (page === undefined) return 'no-page';
+  const script = `(async () => {
+    const video = document.querySelector('video');
+    if (video === null) return 'no-video';
+    video.muted = true;
+    try { await video.play(); } catch (error) { return 'blocked'; }
+    await new Promise(resolve => setTimeout(resolve, ${Math.max(3, Math.min(60, Number(seconds) || 12)) * 1000}));
+    video.pause();
+    return 'played';
+  })()`;
+  try {
+    return String(await evaluateInPage(page.socket, script));
+  } catch (error) {
+    return `error:${String(error?.message ?? error).slice(0, 60)}`;
   }
 }
 

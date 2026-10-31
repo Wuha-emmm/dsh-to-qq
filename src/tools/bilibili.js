@@ -7,7 +7,7 @@
  */
 
 import { fetchPage, bvidOf } from '../media/page.js';
-import { launchBrowser, openUrl, findBrowser } from '../accounts/browser.js';
+import { launchBrowser, openUrl, findBrowser, playInBrowser } from '../accounts/browser.js';
 import {
   postComment,
   userName,
@@ -17,7 +17,7 @@ import {
 } from '../accounts/bilibili-api.js';
 
 /** Actions the tool accepts. */
-const ACTIONS = ['search', 'open', 'comment', 'dynamic', 'history'];
+const ACTIONS = ['search', 'open', 'comment', 'dynamic', 'history', 'watch'];
 
 /**
  * Resolve a video id and numeric aid from a bvid or URL.
@@ -142,6 +142,29 @@ export function registerBilibiliTool(ctx, options) {
         const result = await postDynamic({ text: String(args.message ?? ''), cookie: jar });
         log(`bilibili dynamic: ${result.ok ? 'ok' : result.message}`);
         return { report: result.ok ? result.message : `发动态失败：${result.message}` };
+      }
+      if (action === 'watch') {
+        const raw = String(args.target ?? '').trim();
+        const bvid = /^BV[0-9A-Za-z]{8,12}$/.test(raw) ? raw : bvidOf(raw);
+        if (bvid === '') throw new Error('给一个 bvid（BV…）或视频链接');
+        const port = options.debugPort();
+        const url = `https://www.bilibili.com/video/${bvid}`;
+        await showInBrowser(url);
+        // Wait for the page to boot before asking the player to play.
+        let played = 'no-page';
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          played = await playInBrowser(port, bvid, 12);
+          if (played === 'played' || played === 'blocked') break;
+        }
+        const noted = await reportHistory({ bvid, aid: 0, cookie: jar }).catch(() => false);
+        log(`bilibili watch ${bvid}: ${played}, reported=${noted}`);
+        const text = played === 'played'
+          ? `已在登录窗口播放 ${bvid} 约 12 秒${noted ? '，并上报了观看记录' : ''}`
+          : played === 'blocked'
+            ? '页面加载了但浏览器不允许自动播放（点一下播放键即可）'
+            : `没能播放（${played}）`;
+        return { report: text };
       }
       if (action === 'history') {
         const video = await resolveVideo(args.target, { cookieFor });
