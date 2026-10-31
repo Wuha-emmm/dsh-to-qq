@@ -12,6 +12,8 @@ import { normalizeEvent, chunkText, flattenSegments } from './events.js';
 import { normalizeRequestEvent, describeRequest } from './requests.js';
 import { buildReplySegments, memberNames } from './mentions.js';
 import { shouldSendNotice } from './notice.js';
+import { mergeText } from './outbox.js';
+import { toImageSource } from '../tools/send.js';
 import { admit, blockedWord, tierOf } from '../policy/tiers.js';
 import { Quota, Semaphore } from '../policy/quota.js';
 import { looksLikeApproval } from '../policy/approvals.js';
@@ -388,6 +390,8 @@ export class Bridge {
     this.continuedSessions = new Set();
     /** How often DSH condensed a session and when; shown by qq_status. */
     this.compactionStats = { count: 0, lastAt: 0 };
+    /** Scene -> media waiting to ride along with this turn's reply. */
+    this.mediaQueue = new Map();
     /** Scene -> last bridge notice, so a template is not repeated verbatim. */
     this.sentNotices = new Map();
     /** Group id -> { at, members } for @mentions in replies. */
@@ -1345,14 +1349,16 @@ export class Bridge {
       turnFetchCalls = Number(result.fetchCalls) || 0;
       // A card is the answer: drop the "已发送" text that usually follows it.
       const cardSent = this.cardsSent > cardsBefore;
+      const rawBody = result.text.trim();
       if (shouldStaySilent(result.text, { cardSent })) {
+        await this.#flushMedia(message, '').catch(error => this.log(`media flush failed: ${error?.message ?? error}`));
         this.counters.answered += 1;
         turnOk = true;
-        this.log(`answered ${message.scene} (${tier}) with a card only${result.text.trim() === '' ? '' : `, dropped "${result.text.trim().slice(0, 40)}"`}`);
+        this.log(`answered ${message.scene} (${tier}) with a card only${rawBody === '' ? '' : `, dropped "${rawBody.slice(0, 40)}"`}`);
         void this.pet?.workStatus('success');
         return;
       }
-      const body = result.text.trim() === '' ? '（这轮没有文本回复）' : result.text.trim();
+      const body = rawBody === '' ? '（这轮没有文本回复）' : rawBody;
       const limitCandidates = [config.output.imageThreshold, lengthLimit]
         .map(value => Number(value) || 0)
         .filter(value => value > 0);
@@ -1360,7 +1366,24 @@ export class Bridge {
       const asImage = body.length > replyLimit
         ? await this.sendLongReply(message, body, config, result.reasoning)
         : false;
+      if (asImage) {
+        await this.#flushMedia(message, '').catch(error => this.log(`media flush failed: ${error?.message ?? error}`));
+      }
       if (!asImage) {
+        // A captioned picture rides along with this reply: one message, no repeat.
+        const merged = await this.#flushMedia(message, rawBody).catch(error => {
+          this.log(`media flush failed: ${error?.message ?? error}`);
+          return false;
+        });
+        if (merged) {
+          this.counters.answered += 1;
+          this.lastReply.set(message.scene, rawBody);
+          replyChars = rawBody.length;
+          turnOk = true;
+          this.log(`answered ${message.scene} (${tier}) with media`);
+          void this.pet?.workStatus('success');
+          return;
+        }
         for (const chunk of chunkText(body, CHUNK_LIMIT)) {
           await this.sendText(message, chunk, { record: false });
           await sleep(250);
@@ -1981,6 +2004,63 @@ export class Bridge {
       }
     }
     return members;
+  }
+
+  /**
+   * Hold a captioned picture until the turn's reply is ready.
+   *
+   * @param {string} scene Scene key.
+   * @param {{ caption: string, image: string, file: string }} item What to send.
+   * @returns {void}
+   */
+  queueMedia(scene, item) {
+    const list = this.mediaQueue.get(scene) ?? [];
+    list.push(item);
+    this.mediaQueue.set(scene, list);
+  }
+
+  /**
+   * Send the queued media together with the turn's text.
+   *
+   * @param {import('./events.js').QQMessage} message Triggering message.
+   * @param {string} reply Final assistant text (may be empty).
+   * @returns {Promise<boolean>} True when something was sent.
+   */
+  async #flushMedia(message, reply) {
+    const items = this.mediaQueue.get(message.scene) ?? [];
+    if (items.length === 0) return false;
+    this.mediaQueue.delete(message.scene);
+    const text = mergeText(reply, items.map(item => item.caption));
+    const images = items.filter(item => item.image !== '');
+    const files = items.filter(item => item.file !== '');
+    /** @type {Array<{ type: string, data: Record<string, unknown> }>} */
+    const segments = [];
+    for (const chunk of text === '' ? [] : chunkText(text, CHUNK_LIMIT)) {
+      segments.push({ type: 'text', data: { text: chunk } });
+    }
+    for (const item of images.slice(0, 4)) {
+      segments.push({ type: 'image', data: { file: toImageSource(item.image) } });
+    }
+    const isGroup = message.kind === 'group';
+    const params = isGroup ? { group_id: message.groupId } : { user_id: message.peerId };
+    if (segments.length > 0) {
+      await this.client.call(isGroup ? 'send_group_msg' : 'send_private_msg', { ...params, message: segments }, { timeoutMs: 30_000 });
+    }
+    // Extra pictures and files follow as their own messages.
+    for (const item of images.slice(4)) {
+      await this.client.call(isGroup ? 'send_group_msg' : 'send_private_msg', {
+        ...params,
+        message: [{ type: 'image', data: { file: toImageSource(item.image) } }],
+      }, { timeoutMs: 30_000 });
+    }
+    for (const item of files) {
+      const upload = isGroup ? 'upload_group_file' : 'upload_private_file';
+      const name = item.file.split(/[\\/]/).pop() ?? 'file';
+      await this.client.call(upload, { ...params, file: item.file, name }, { timeoutMs: 60_000 });
+    }
+    this.recordOutbound(message, text === '' ? '[图片]' : text, images.length > 0 ? 'image' : undefined);
+    this.log(`media flushed with reply for ${message.scene} (${images.length} image(s), ${files.length} file(s))`);
+    return true;
   }
 
   /**

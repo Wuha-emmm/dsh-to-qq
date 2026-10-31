@@ -2,12 +2,14 @@
  * `qq_send`: post text, an image, or a file into the QQ conversation that
  * triggered this turn.
  *
- * The tool never accepts a destination: it always answers where it was asked.
- * Local attachments are admin-only, because a group member must not be able to
- * pull files off this machine by asking nicely.
+ * Two shapes, on purpose:
+ *   - media without text  → sent immediately (evidence the person asked to see);
+ *   - media with a caption → queued, then merged with the turn's reply so the
+ *     picture and the conclusion arrive as one message instead of two.
  */
 
-/** OneBot message segment, kept loose because the wire shape is per action. */
+import { captionOf } from '../bridge/outbox.js';
+
 const textSegment = text => ({ type: 'text', data: { text } });
 
 /**
@@ -28,19 +30,20 @@ export function toImageSource(value) {
  *
  * @param {object} ctx Plugin context (needs `tools`).
  * @param {object} options Wiring.
- * @param {object} options.bridge The bridge, for client access and session lookup.
+ * @param {any} options.bridge The bridge.
  * @param {(line: string) => void} options.log Diagnostic sink.
  * @returns {() => void} Disposer.
  */
 export function registerQqSendTool(ctx, options) {
   return ctx.tools.register({
     name: 'qq_send',
-    description: 'Send something into the current QQ conversation: text, an image, or a file. Use it when the user asks you to "send me that", "发给我", or to post a result back into the chat. Only an administrator may attach a local image or file.',
+    description:
+      'Send something into the current QQ conversation: text, an image, or a file. Use it when the user asks you to send/receive a file or a screenshot. With an image, leave text empty unless the picture plus one short line is the whole message (a caption over 30 characters is cut, because the same explanation repeated in your reply is what the person sees twice). Local images/files are administrator only.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        text: { type: 'string', description: 'Plain text to send, before any attachment.' },
+        text: { type: 'string', description: 'Short caption (under 30 characters). Leave empty when the reply will explain it.' },
         image: { type: 'string', description: 'Absolute path or http(s) URL of an image to send. Admin only.' },
         file: { type: 'string', description: 'Absolute path of a file to upload. Admin only.' },
       },
@@ -67,6 +70,22 @@ export function registerQqSendTool(ctx, options) {
       const action = isGroup ? 'send_group_msg' : 'send_private_msg';
       const baseParams = isGroup ? { group_id: targetId } : { user_id: targetId };
 
+      const caption = captionOf(args.text);
+      // A captioned picture is part of the answer: hold it for the reply.
+      if ((wantsImage || wantsFile) && caption.text !== '') {
+        bridge.queueMedia(context.scene, {
+          caption: caption.text,
+          image: wantsImage ? String(args.image) : '',
+          file: wantsFile ? String(args.file) : '',
+        });
+        options.log(`qq_send queued ${context.scene} (caption ${caption.text.length} chars)`);
+        return {
+          report: `已排到本轮回复里一起发送${caption.truncated ? '（说明超过 30 字，已截断；剩下的写进正文）' : ''}`,
+          scene: context.scene,
+          queued: true,
+        };
+      }
+
       /** @type {Array<{ type: string, data: Record<string, unknown> }>} */
       const segments = [];
       if (typeof args.text === 'string' && args.text.trim() !== '') segments.push(textSegment(args.text));
@@ -76,6 +95,7 @@ export function registerQqSendTool(ctx, options) {
       if (segments.length > 0) {
         await bridge.client.call(action, { ...baseParams, message: segments }, { timeoutMs: 20_000 });
         sent.push(segments.map(segment => segment.type).join('+'));
+        bridge.recordSceneOutbound?.(context.scene, String(args.text ?? '').trim() || '[图片]', wantsImage ? 'image' : undefined);
       }
       if (wantsFile) {
         const upload = isGroup ? 'upload_group_file' : 'upload_private_file';
@@ -83,6 +103,7 @@ export function registerQqSendTool(ctx, options) {
         const name = path.split(/[\\/]/).pop() ?? 'file';
         await bridge.client.call(upload, { ...baseParams, file: path, name }, { timeoutMs: 60_000 });
         sent.push(`file:${name}`);
+        bridge.recordSceneOutbound?.(context.scene, `[文件] ${name}`, 'file');
       }
       if (sent.length === 0) throw new Error('nothing to send: pass text, image, or file');
 
