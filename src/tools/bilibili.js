@@ -10,6 +10,7 @@ import { fetchPage, bvidOf } from '../media/page.js';
 import { launchBrowser, openUrl, findBrowser } from '../accounts/browser.js';
 import {
   postComment,
+  userName,
   postDynamic,
   reportHistory,
   searchVideos,
@@ -72,7 +73,7 @@ export function registerBilibiliTool(ctx, options) {
   return ctx.tools.register({
     name: 'bilibili',
     description:
-      'Act on Bilibili with the account signed in through the 登录 tab. Actions: "search" a keyword in a real browser tab (so it lands in the account history) and return the top videos; "open" a video/URL in that browser; "comment" on a video; "dynamic" publish a plain-text dynamic; "history" mark a video as watched. Writing needs the cookie; risk control may refuse with its own message.',
+      'Act on Bilibili with the account signed in through the 登录 tab. Actions: "search" a keyword in a real browser tab (so it lands in the account history) and return the top videos; "open" a video/URL in that browser; "comment" on a video; "dynamic" publish a plain-text dynamic; "history" mark a video as watched. For a mention pass mention as the Bilibili uid: a bare @name in the text links to whoever happens to own that nickname, which is usually not the person meant. Writing needs the cookie; risk control may refuse with its own message.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -81,6 +82,7 @@ export function registerBilibiliTool(ctx, options) {
         query: { type: 'string', description: 'Search keyword (action search).' },
         target: { type: 'string', description: 'Video bvid/URL or page URL (open/comment/history).' },
         message: { type: 'string', description: 'Comment text, or dynamic text.' },
+        mention: { type: 'string', description: 'Bilibili uid (e.g. 10217007) to @ in the comment. A QQ nickname or a bare @text does not notify anyone.' },
       },
       required: ['action'],
     },
@@ -123,9 +125,18 @@ export function registerBilibiliTool(ctx, options) {
         const video = await resolveVideo(args.target, { cookieFor });
         if (video === undefined) throw new Error('给一个 bvid（BV…）或视频链接');
         if (video.aid <= 0) throw new Error('拿不到这个视频的 aid，B站可能改版了');
-        const result = await postComment({ aid: video.aid, message: String(args.message ?? ''), cookie: jar });
+        const mentionUid = Number(args.mention) || 0;
+        const nickname = mentionUid > 0 ? await userName(mentionUid, jar) : '';
+        const result = await postComment({
+          aid: video.aid,
+          message: String(args.message ?? ''),
+          cookie: jar,
+          mentionUid,
+          ...(nickname === '' ? {} : { mentionNickname: nickname }),
+        });
         log(`bilibili comment on ${video.bvid}: ${result.ok ? 'ok' : result.message}`);
-        return { report: result.ok ? `已评论 ${video.title || video.bvid}：${result.message}` : `评论失败：${result.message}` };
+        const who = nickname === '' ? '' : `（已 @${nickname}）`;
+        return { report: result.ok ? `已评论 ${video.title || video.bvid}${who}：${result.message}` : `评论失败：${result.message}` };
       }
       if (action === 'dynamic') {
         const result = await postDynamic({ text: String(args.message ?? ''), cookie: jar });

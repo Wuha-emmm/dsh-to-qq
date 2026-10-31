@@ -95,6 +95,61 @@ export async function wbiMaterial(cookie, fetchImpl = fetch) {
 }
 
 /**
+ * Read a user's display name by uid.
+ *
+ * A Bilibili mention only links when the text carries the account's exact
+ * nickname followed by a space; a QQ nickname or a bare uid never resolves.
+ *
+ * @param {number} mid User id.
+ * @param {string} cookie Cookie header.
+ * @param {typeof fetch} [fetchImpl] Fetch implementation.
+ * @returns {Promise<string>} Nickname, or '' when unknown.
+ */
+export async function userName(mid, cookie, fetchImpl = fetch) {
+  const id = Number(mid) || 0;
+  if (id <= 0) return '';
+  let key;
+  try {
+    ({ key } = await wbiMaterial(cookie, fetchImpl));
+  } catch {
+    return '';
+  }
+  const signed = signWbi({ mid: String(id) }, key);
+  const query = new URLSearchParams(signed).toString();
+  try {
+    const response = await fetchImpl(`https://api.bilibili.com/x/space/wbi/acc/info?${query}`, {
+      headers: {
+        cookie,
+        'user-agent': USER_AGENT,
+        referer: `https://space.bilibili.com/${id}`,
+        accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const payload = await response.json();
+    if (Number(payload?.code) !== 0) return '';
+    return String(payload?.data?.name ?? '');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Make sure a comment body carries a real mention of the nickname.
+ *
+ * @param {string} message Comment text.
+ * @param {string} nickname Bilibili nickname.
+ * @returns {string} Text with `@nickname ` present.
+ */
+export function withMention(message, nickname) {
+  const name = String(nickname ?? '').trim();
+  const body = String(message ?? '').trim();
+  if (name === '') return body;
+  if (body.includes(`@${name}`)) return body;
+  return `${body} @${name} `.trimEnd();
+}
+
+/**
  * Read the numeric ids of a video.
  *
  * @param {{ bvid?: string, aid?: number, cookie: string }} request Video identity.
@@ -132,7 +187,7 @@ export async function videoIds(request, fetchImpl = fetch) {
 /**
  * Post a comment on a video.
  *
- * @param {{ aid: number, message: string, cookie: string }} request Comment details.
+ * @param {{ aid: number, message: string, cookie: string, mentionUid?: number }} request Comment details.
  * @param {typeof fetch} [fetchImpl] Fetch implementation.
  * @returns {Promise<{ ok: boolean, message: string }>} Result.
  */
@@ -143,10 +198,18 @@ export async function postComment(request, fetchImpl = fetch) {
   if (message === '') return { ok: false, message: '评论内容为空' };
   const { csrf } = await wbiMaterial(request.cookie, fetchImpl);
   if (csrf === '') return { ok: false, message: 'cookie 里没有 bili_jct，无法发评论' };
-  const body = new URLSearchParams({
+  // A mention only links with the exact nickname and a trailing space.
+  let body = message;
+  if (Number(request.mentionUid) > 0) {
+    const nickname = request.mentionNickname === undefined
+      ? await userName(Number(request.mentionUid), request.cookie, fetchImpl)
+      : String(request.mentionNickname);
+    if (nickname !== '') body = withMention(body, nickname);
+  }
+  const form = new URLSearchParams({
     oid: String(aid),
     type: '1',
-    message,
+    message: body,
     plat: '1',
     ordering: 'nano',
     csrf,
@@ -159,7 +222,7 @@ export async function postComment(request, fetchImpl = fetch) {
       referer: `https://www.bilibili.com/video/av${aid}`,
       'content-type': 'application/x-www-form-urlencoded',
     },
-    body: body.toString(),
+    body: form.toString(),
     signal: AbortSignal.timeout(12_000),
   });
   const payload = await response.json().catch(() => ({}));

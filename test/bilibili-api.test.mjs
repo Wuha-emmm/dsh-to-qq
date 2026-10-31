@@ -10,6 +10,8 @@ import {
   wbiMaterial,
   videoIds,
   reportHistory,
+  userName,
+  withMention,
 } from '../src/accounts/bilibili-api.js';
 
 const COOKIE = 'SESSDATA=abc; bili_jct=csrf123; DedeUserID=42';
@@ -115,4 +117,38 @@ test('a history report needs a real cid', async () => {
   assert.equal(await reportHistory({ aid: 123, cookie: COOKIE }, fakeFetch), true);
   const report = calls.find(call => String(call.url).includes('/history/report'));
   assert.match(report.init.body, /cid=456/);
+});
+
+test('a mention is placed with a trailing space and not duplicated', () => {
+  assert.equal(withMention('说法我认同。', '呜哈丶emmm'), '说法我认同。 @呜哈丶emmm');
+  assert.equal(withMention('已经 @呜哈丶emmm 了', '呜哈丶emmm'), '已经 @呜哈丶emmm 了');
+  assert.equal(withMention('没有昵称', ''), '没有昵称');
+});
+
+test('a uid resolves to the exact nickname that makes the mention link', async () => {
+  const fakeFetch = async url => {
+    if (String(url).includes('/nav')) {
+      return { json: async () => ({ code: 0, data: { isLogin: true, wbi_img: { img_url: 'https://x/a.png', sub_url: 'https://x/b.png' } } }) };
+    }
+    assert.match(String(url), /acc\/info/);
+    return { json: async () => ({ code: 0, data: { name: '呜哈丶emmm' } }) };
+  };
+  assert.equal(await userName(10217007, COOKIE, fakeFetch), '呜哈丶emmm');
+  assert.equal(await userName(0, COOKIE, fakeFetch), '');
+});
+
+test('a comment can carry a resolved mention', async () => {
+  const calls = [];
+  const fakeFetch = async (url, init) => {
+    calls.push({ url, init });
+    if (String(url).includes('/nav')) {
+      return { json: async () => ({ code: 0, data: { isLogin: true, wbi_img: { img_url: 'https://x/a.png', sub_url: 'https://x/b.png' } } }) };
+    }
+    if (String(url).includes('acc/info')) return { json: async () => ({ code: 0, data: { name: '呜哈丶emmm' } }) };
+    return { json: async () => ({ code: 0 }) };
+  };
+  const result = await postComment({ aid: 5, message: '说得好。', cookie: COOKIE, mentionUid: 10217007 }, fakeFetch);
+  assert.equal(result.ok, true);
+  const reply = calls.find(call => String(call.url).includes('/reply/add'));
+  assert.match(decodeURIComponent(reply.init.body.replace(/\+/g, ' ')), /@呜哈丶emmm/);
 });
