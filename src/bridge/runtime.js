@@ -18,7 +18,7 @@ import { renderCard } from '../memory/store.js';
 import { renderTextImageBase64 } from '../render/text-image.js';
 import { promptImageParts, persistImage, imageSegments, looksLikeSticker, downloadImage } from '../media/inbound.js';
 import { describeQuestions, parseReply, extractPending } from './questions.js';
-import { parseCommand, formatSessionList, extractSessions } from './commands.js';
+import { parseCommand, formatSessionList, extractSessions, cleanupCandidates } from './commands.js';
 import { voiceSegments, transcribeVoice } from '../media/voice.js';
 import { fetchForwards } from '../media/forward.js';
 import { renderStickerBlock } from '../stickers/catalog.js';
@@ -738,6 +738,48 @@ export class Bridge {
         await this.map?.remove(scene);
         this.sessionChoices.delete(scene);
         await this.sendText(message, '下一条消息会开一个新会话。');
+        return;
+      }
+      case 'cleanup': {
+        const preview = /预览|dry/i.test(command.arg);
+        const config = this.store.get();
+        let items = [];
+        try {
+          items = extractSessions(await this.controller.list({}, AbortSignal.timeout(8000)));
+        } catch (error) {
+          await this.sendText(message, `取会话列表失败：${String(error?.message ?? error).slice(0, 140)}`);
+          return;
+        }
+        const bound = new Set(Object.values(this.map?.all?.() ?? {}));
+        const keepHours = Math.max(1, Number(config.conversation.cleanupKeepHours) || 24);
+        const candidates = cleanupCandidates(items, {
+          bound,
+          keepMs: keepHours * 3600_000,
+          cwd: config.conversation.cwd,
+        });
+        if (candidates.length === 0) {
+          await this.sendText(message, `没有可清理的会话（绑定 ${bound.size} 个，${keepHours} 小时内活跃的都保留）。`);
+          return;
+        }
+        if (preview) {
+          const sample = candidates.slice(0, 8).map(item => `· ${item.title ?? item.id}`).join('\n');
+          await this.sendText(message, `预览：可清理 ${candidates.length} 个（未执行）\n${sample}\n发 /清理会话 执行。`);
+          return;
+        }
+        let archived = 0;
+        let failed = 0;
+        for (const item of candidates) {
+          try {
+            await this.archiveSession?.(item.id);
+            archived += 1;
+          } catch {
+            failed += 1;
+          }
+        }
+        await this.sendText(message, [
+          `已清理 ${archived} 个会话${failed === 0 ? '' : `（${failed} 个失败）`}。`,
+          `保留：绑定中的 ${bound.size} 个 + ${keepHours} 小时内活跃的。文件没有删除，只是归档。`,
+        ].join('\n'));
         return;
       }
       case 'digest': {

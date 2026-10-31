@@ -28,6 +28,9 @@ const ALIASES = new Map([
   ['digest', 'digest'],
   ['人设', 'persona'],
   ['persona', 'persona'],
+  ['清理会话', 'cleanup'],
+  ['清会话', 'cleanup'],
+  ['cleanup', 'cleanup'],
   ['补印象', 'impressions'],
   ['impressions', 'impressions'],
 ]);
@@ -70,6 +73,27 @@ export function formatSessionList(items, limit = 10) {
  * @param {any} value Result of `sessionController.list(...)`.
  * @returns {Array<{ id: string, title?: string, updatedAt?: number }>} Sessions.
  */
+/**
+ * Sessions a cleanup may archive: unbound, not running, older than the window.
+ *
+ * @param {ReadonlyArray<{ id: string, updatedAt?: number, cwd?: string, archived?: boolean, running?: boolean }>} items Rows from list().
+ * @param {{ bound: Set<string>, keepMs: number, cwd?: string, now?: number }} options Protection and window.
+ * @returns {Array<{ id: string, title?: string, updatedAt?: number }>} Candidates, oldest first.
+ */
+export function cleanupCandidates(items, options) {
+  const bound = options.bound ?? new Set();
+  const keepMs = Math.max(0, Number(options.keepMs) || 0);
+  const wanted = String(options.cwd ?? '').toLowerCase();
+  const now = Number(options.now) || Date.now();
+  return (Array.isArray(items) ? items : [])
+    .filter(item => item !== null && typeof item === 'object' && typeof item.id === 'string')
+    .filter(item => bound.has(item.id) === false)
+    .filter(item => item.archived !== true && item.running !== true)
+    .filter(item => now - (Number(item.updatedAt) || 0) >= keepMs)
+    .filter(item => wanted === '' || String(item.cwd ?? '').toLowerCase() === wanted)
+    .sort((a, b) => (Number(a.updatedAt) || 0) - (Number(b.updatedAt) || 0));
+}
+
 export function extractSessions(value) {
   const raw = Array.isArray(value)
     ? value
@@ -80,7 +104,14 @@ export function extractSessions(value) {
   return raw
     .map(item => (item !== null && typeof item === 'object' ? { ...item } : null))
     .filter(item => item !== null && typeof item.id === 'string')
-    .map(item => ({ id: item.id, title: item.title ?? item.summary, updatedAt: item.updatedAt }));
+    .map(item => ({
+      id: item.id,
+      title: item.title ?? item.summary,
+      updatedAt: item.updatedAt,
+      cwd: typeof item.cwd === 'string' ? item.cwd : undefined,
+      archived: item.archived === true,
+      running: item.running === true,
+    }));
 }
 
 
