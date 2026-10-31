@@ -150,24 +150,36 @@ export async function backfillImpressions(bridge, options = {}) {
   if (bridge.impressionBusy === true) return 0;
   bridge.impressionBusy = true;
   const perSender = Math.max(50, Math.min(500, Number(options.perSender) || 200));
+  // A manual run is an explicit request, so it accepts quieter members; the
+  // automatic pass keeps the stricter threshold.
+  const minChars = options.relaxed === true ? 120 : 300;
+  const minDistinct = options.relaxed === true ? 4 : 8;
   bridge.impressionStats.startedAt = Date.now();
   bridge.impressionStats.scanned = 0;
   bridge.impressionStats.failed = 0;
   bridge.impressionStats.backfillFilled = 0;
+  bridge.impressionStats.skippedExisting = 0;
+  bridge.impressionStats.skippedThin = 0;
   bridge.impressionStats.total = bridge.archive.distinctSenders().length;
 
+  // The bot is not a person: skip its own number even before selfId is learned.
+  const self = Number(bridge.selfId) || Number(config.connection?.botUin) || 0;
   let filled = 0;
   try {
     for (const senderId of bridge.archive.distinctSenders()) {
-      if (senderId === bridge.selfId) continue;
+      if (self > 0 && senderId === self) continue;
       const card = bridge.memory.get(senderId);
       // Someone already processed keeps their cursor; never overwrite it.
-      if (Number(card.impressionCursor ?? 0) > 0) continue;
+      if (Number(card.impressionCursor ?? 0) > 0) {
+        bridge.impressionStats.skippedExisting += 1;
+        continue;
+      }
       const batch = bridge.archive.latestSenderMessages(senderId, perSender);
       bridge.impressionStats.scanned += 1;
-      // A first pass reads whatever exists: a quiet member with 300 characters
-      // still deserves a line, as long as they said several different things.
-      if (enoughSignal(batch, 300, 8) !== true) continue;
+      if (enoughSignal(batch, minChars, minDistinct) !== true) {
+        bridge.impressionStats.skippedThin += 1;
+        continue;
+      }
       const ok = await writeImpressions(bridge, senderId, card, batch, config);
       if (ok) filled += 1;
       else bridge.impressionStats.failed += 1;
@@ -181,5 +193,3 @@ export async function backfillImpressions(bridge, options = {}) {
   if (filled > 0) bridge.log(`impressions backfilled for ${filled} people`);
   return filled;
 }
-
-

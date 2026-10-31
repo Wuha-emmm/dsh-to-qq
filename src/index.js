@@ -38,7 +38,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.54.1';
+const VERSION = '0.54.2';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -727,7 +727,7 @@ export function apply(ctx) {
             return;
           }
           // Fire and forget: the run takes minutes, the panel polls for progress.
-          void bridge.backfillImpressions().catch(error => {
+          void bridge.backfillImpressions({ relaxed: true }).catch(error => {
             log(`manual impression backfill failed: ${error?.message ?? error}`);
           });
           send(200, { started: true, busy: true, stats });
@@ -961,6 +961,7 @@ export function apply(ctx) {
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
 }
+
 
 
 

@@ -325,7 +325,7 @@ export class Bridge {
     /** True while an impression run is in flight, so two never overlap. */
     this.impressionBusy = false;
     /** Counters for qq_status: how the impression runs are going. */
-    this.impressionStats = { backfillFilled: 0, scanned: 0, failed: 0, lastError: '', lastAt: 0, startedAt: 0, total: 0 };
+    this.impressionStats = { backfillFilled: 0, scanned: 0, failed: 0, skippedExisting: 0, skippedThin: 0, lastError: '', lastAt: 0, startedAt: 0, total: 0 };
     // Restore the last run's counters so a restart does not blank the panel.
     if (typeof options.memory?.impressionStats === 'function') {
       Object.assign(this.impressionStats, options.memory.impressionStats());
@@ -788,12 +788,16 @@ export class Bridge {
       }
       case 'impressions': {
         await this.sendText(message, '开始补印象，可能慢（每人一次模型调用），好了我告诉你。');
-        const filled = await this.backfillImpressions();
+        const filled = await this.backfillImpressions({ relaxed: true });
         const stats = this.impressionStats;
+        const thin = Number(stats.skippedThin) || 0;
+        const existing = Number(stats.skippedExisting) || 0;
         await this.sendText(message, [
           `补完：${filled} 个人拿到了印象`,
-          `扫描 ${stats.scanned} 人，失败 ${stats.failed} 次${stats.lastError === '' ? '' : `（最近一次：${stats.lastError}）`}`,
-        ].join('\n'));
+          `扫描 ${stats.scanned} 人 / 已有印象跳过 ${existing} 人 / 素材不足跳过 ${thin} 人`,
+          `失败 ${stats.failed} 次${stats.lastError === '' ? '' : `（最近一次：${stats.lastError}）`}`,
+          thin === 0 ? '' : '素材不足 = 发言少于 4 条或不足 120 字，等他们多说几句再补。',
+        ].filter(line => line !== '').join('\n'));
         return;
       }
       case 'persona': {
