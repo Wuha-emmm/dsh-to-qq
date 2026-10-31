@@ -1368,7 +1368,8 @@ const StickerBoard = () => {
                 fieldRow({ path: 'models.outputPrice', label: '输出 ¥/M', type: 'number' }),
                 fieldRow({ path: 'models.cachePrice', label: '缓存 ¥/M', type: 'number' })),
                 fieldRow({ path: 'models.offPeakDiscount', label: '空闲折扣 (0-1)', type: 'number' }),
-                fieldRow({ path: 'models.offPeakWindow', label: '空闲时段', type: 'text', placeholder: '00:30-08:30' }),
+                fieldRow({ path: 'models.peakWindows', label: '高峰时段', type: 'text', placeholder: '09:00-12:00,14:00-18:00' }),
+                fieldRow({ path: 'models.peakHolidays', label: '节假日(YYYY-MM-DD, 逗号)', type: 'text' }),
               h('div', { key: 'permission', style: { marginTop: 6 } },
                 fieldRow({
                   path: 'models.permissionPreset',

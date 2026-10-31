@@ -1,15 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { estimateCost, sumCosts, cacheRate, isOffPeak } from '../src/llm/cost.js';
+import { estimateCost, sumCosts, cacheRate, isPeak } from '../src/llm/cost.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openArchive } from '../src/archive/db.js';
 
 test('cost uses each price bucket', () => {
+  const fridayPeak = new Date(2026, 9, 30, 10, 0).getTime();
   const estimate = estimateCost(
     { inputTokens: 1_000_000, outputTokens: 500_000, cacheReadTokens: 2_000_000 },
     { input: 1, output: 2, cache: 0.1 },
+    fridayPeak,
   );
   assert.deepEqual(estimate, { input: 1_000_000, output: 500_000, cache: 2_000_000, cost: 2.2, offPeak: false });
 });
@@ -48,19 +50,23 @@ test('the ledger stores tokens per turn and totals them', async () => {
   }
 });
 
-test('off-peak turns cost half at the configured window', () => {
-  const prices = { input: 2, output: 8, cache: 0.04, offPeakDiscount: 0.5, offPeakWindow: '00:30-08:30' };
-  const peak = new Date(2026, 9, 31, 15, 0).getTime();
-  const night = new Date(2026, 9, 31, 3, 0).getTime();
+test('peak turns use the full price and weekends the discount', () => {
+  const prices = { input: 2, output: 8, cache: 0.04, offPeakDiscount: 0.5 };
+  const peak = new Date(2026, 9, 30, 15, 0).getTime();   // Friday 15:00
+  const night = new Date(2026, 10, 1, 3, 0).getTime();   // Sunday 03:00
   const usage = { inputTokens: 1_000_000, outputTokens: 1_000_000, cacheReadTokens: 1_000_000 };
   assert.equal(estimateCost(usage, prices, peak).cost, 10.04);
   assert.equal(estimateCost(usage, prices, night).cost, 5.02);
   assert.equal(estimateCost(usage, prices, night).offPeak, true);
 });
 
-test('the window is local time and may wrap midnight', () => {
-  assert.equal(isOffPeak(new Date(2026, 9, 31, 23, 0).getTime(), '22:00-02:00'), true);
-  assert.equal(isOffPeak(new Date(2026, 9, 31, 1, 0).getTime(), '22:00-02:00'), true);
-  assert.equal(isOffPeak(new Date(2026, 9, 31, 12, 0).getTime(), '22:00-02:00'), false);
-  assert.equal(isOffPeak(Date.now(), ''), false);
+test('peak is weekday work hours, with lunch and holidays off', () => {
+  const friday = day => new Date(2026, 9, day).getTime();
+  assert.equal(isPeak(new Date(2026, 9, 30, 9, 30).getTime()), true, 'Friday 09:30');
+  assert.equal(isPeak(new Date(2026, 9, 30, 12, 30).getTime()), false, 'Friday lunch');
+  assert.equal(isPeak(new Date(2026, 9, 30, 14, 30).getTime()), true, 'Friday 14:30');
+  assert.equal(isPeak(new Date(2026, 9, 30, 18, 30).getTime()), false, 'Friday evening');
+  assert.equal(isPeak(new Date(2026, 10, 1, 10, 0).getTime()), false, 'Sunday');
+  assert.equal(isPeak(new Date(2026, 9, 30, 10, 0).getTime(), { holidays: '2026-10-30' }), false, 'holiday');
+  void friday;
 });

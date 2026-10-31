@@ -7,28 +7,51 @@
  */
 
 /**
- * Whether a moment falls inside an off-peak window.
+ * Parse `HH:MM-HH:MM[,HH:MM-HH:MM]` into minute ranges.
+ *
+ * @param {string} value Window list.
+ * @returns {Array<{ start: number, end: number }>} Ranges in minutes.
+ */
+function parseWindows(value) {
+  const ranges = [];
+  for (const part of String(value ?? '').split(',')) {
+    const match = /^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/.exec(part.trim());
+    if (match === null) continue;
+    ranges.push({ start: Number(match[1]) * 60 + Number(match[2]), end: Number(match[3]) * 60 + Number(match[4]) });
+  }
+  return ranges;
+}
+
+/**
+ * Whether a moment is billed at the peak rate.
+ *
+ * DeepSeek's peak window is Monday to Friday, 09:00-12:00 and 14:00-18:00
+ * Beijing time, excluding listed holidays; everything else is half price.
  *
  * @param {number} at Epoch milliseconds.
- * @param {string} window `HH:MM-HH:MM` in local time; empty disables the check.
- * @returns {boolean} True inside the window.
+ * @param {{ windows?: string, holidays?: string }} [schedule] Peak windows and YYYY-MM-DD holidays.
+ * @returns {boolean} True when peak.
  */
-export function isOffPeak(at, window) {
-  const match = /^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/.exec(String(window ?? '').trim());
-  if (match === null) return false;
+export function isPeak(at, schedule = {}) {
   const date = new Date(Number(at) || Date.now());
+  const weekday = date.getDay();
+  if (weekday === 0 || weekday === 6) return false;
+  const stamp = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  const holidays = String(schedule.holidays ?? '')
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean);
+  if (holidays.includes(stamp)) return false;
   const minutes = date.getHours() * 60 + date.getMinutes();
-  const start = Number(match[1]) * 60 + Number(match[2]);
-  const end = Number(match[3]) * 60 + Number(match[4]);
-  if (start === end) return false;
-  return start < end ? minutes >= start && minutes < end : minutes >= start || minutes < end;
+  return parseWindows(schedule.windows ?? '09:00-12:00,14:00-18:00')
+    .some(range => minutes >= range.start && minutes < range.end);
 }
 
 /**
  * Cost of one usage record.
  *
  * @param {{ inputTokens?: number, outputTokens?: number, cacheReadTokens?: number }} usage Usage.
- * @param {{ input?: number, output?: number, cache?: number, offPeakDiscount?: number, offPeakWindow?: string }} prices ¥ per 1M tokens (peak), discount and window.
+ * @param {{ input?: number, output?: number, cache?: number, offPeakDiscount?: number, peakWindows?: string, peakHolidays?: string }} prices ¥ per 1M tokens (peak), discount and peak schedule.
  * @param {number} [at] Epoch milliseconds of the turn; decides peak or off-peak.
  * @returns {{ input: number, output: number, cache: number, cost: number | null, offPeak: boolean }} Tokens and ¥.
  */
@@ -42,8 +65,10 @@ export function estimateCost(usage, prices, at = Date.now()) {
   if (!Number.isFinite(pIn) || !Number.isFinite(pOut) || !Number.isFinite(pCache) || (pIn === 0 && pOut === 0 && pCache === 0)) {
     return { input, output, cache, cost: null, offPeak: false };
   }
-  const offPeak = isOffPeak(at, prices?.offPeakWindow);
-  const discount = offPeak ? Math.min(1, Math.max(0, Number(prices?.offPeakDiscount) || 0)) : 1;
+  const offPeak = !isPeak(at, { windows: prices?.peakWindows, holidays: prices?.peakHolidays });
+  // No configured discount means the schedule does not apply at all.
+  const configured = Number(prices?.offPeakDiscount);
+  const discount = offPeak && Number.isFinite(configured) && configured > 0 && configured < 1 ? configured : 1;
   const cost = (input * pIn + output * pOut + cache * pCache) / 1_000_000 * discount;
   return { input, output, cache, cost, offPeak };
 }

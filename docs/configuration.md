@@ -42,11 +42,12 @@
 
 | 键 | 默认值 | 范围 | 说明 |
 |---|---|---|---|
-| `offPeakDiscount` | `0.5` | — |  |
-| `offPeakWindow` | `00:30-08:30` | — |  |
-| `inputPrice` | `2` | — |  |
-| `outputPrice` | `8` | — |  |
-| `cachePrice` | `0.04` | — |  |
+| `offPeakDiscount` | `0.5` | `0 ~ 1` |  |
+| `peakWindows` | `09:00-12:00,14:00-18:00` | — |  |
+| `peakHolidays` | `""`（空） | — |  |
+| `inputPrice` | `2` | `0 ~ 1000` |  |
+| `outputPrice` | `8` | `0 ~ 1000` |  |
+| `cachePrice` | `0.04` | `0 ~ 1000` |  |
 | `permissionPreset` | `danger-full-access` | — |  |
 | `owner.provider` | `""`（空） | — | 管理员私聊使用的服务商；空 = DSH 默认 |
 | `owner.model` | `""`（空） | — | 管理员私聊模型；空 = 该服务商首个模型 |

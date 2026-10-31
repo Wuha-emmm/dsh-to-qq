@@ -62,7 +62,9 @@ export function defaults() {
       /** Off-peak prices are this fraction of the peak ones (DeepSeek: 0.5). */
       offPeakDiscount: 0.5,
       /** Off-peak window in local time; empty disables the discount. */
-      offPeakWindow: '00:30-08:30',
+      peakWindows: '09:00-12:00,14:00-18:00',
+      /** YYYY-MM-DD, comma separated; those days are billed off-peak all day. */
+      peakHolidays: '',
       /** ¥ per 1M tokens; all zero means "not configured" and the panel shows tokens only. */
       inputPrice: 2,
       outputPrice: 8,
@@ -202,6 +204,10 @@ export const RANGES = {
   'archive.mediaRetentionDays': [0, 3650],
   'connection.botUin': [0, 99999999999],
   'safety.confirmTtlMs': [10_000, 600_000],
+  'models.inputPrice': [0, 1000],
+  'models.outputPrice': [0, 1000],
+  'models.cachePrice': [0, 1000],
+  'models.offPeakDiscount': [0, 1],
 };
 
 /**
@@ -233,7 +239,10 @@ export function normalize(config) {
   for (const [path, [min, max]] of Object.entries(RANGES)) {
     const [section, key] = path.split('.');
     const value = Number(config[section][key]);
-    config[section][key] = Number.isFinite(value) ? Math.min(max, Math.max(min, Math.round(value))) : min;
+    // Prices and discounts keep their decimals; everything else is a whole number.
+    const fractional = path === 'models.inputPrice' || path === 'models.outputPrice'
+      || path === 'models.cachePrice' || path === 'models.offPeakDiscount';
+    config[section][key] = Number.isFinite(value) ? Math.min(max, Math.max(min, fractional ? value : Math.round(value))) : min;
   }
 
   const enums = {
@@ -242,10 +251,6 @@ export function normalize(config) {
     'limits.overLimit': ['refuse', 'silent', 'queue'],
     'output.style': ['light', 'dark', 'bubble'],
     'models.permissionPreset': ['', 'auto', 'workspace-write', 'danger-full-access'],
-    'models.inputPrice': [0, 1000],
-    'models.offPeakDiscount': [0, 1],
-    'models.outputPrice': [0, 1000],
-    'models.cachePrice': [0, 1000],
   };
   for (const [path, allowed] of Object.entries(enums)) {
     const [section, key] = path.split('.');

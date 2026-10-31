@@ -39,7 +39,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.57.1';
+const VERSION = '0.57.2';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -761,7 +761,8 @@ export function apply(ctx) {
           output: Number(store.get().models.outputPrice) || 0,
           cache: Number(store.get().models.cachePrice) || 0,
           offPeakDiscount: Number(store.get().models.offPeakDiscount) || 0,
-          offPeakWindow: String(store.get().models.offPeakWindow ?? ''),
+          peakWindows: String(store.get().models.peakWindows ?? ''),
+          peakHolidays: String(store.get().models.peakHolidays ?? ''),
         };
         const rows = bridge.archive?.recentTurns?.(30) ?? [];
         const recent = rows.map(row => {
@@ -1067,6 +1068,7 @@ export function apply(ctx) {
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
 }
+
 
 
 

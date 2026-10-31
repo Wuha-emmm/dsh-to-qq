@@ -16,7 +16,7 @@ const record = (messageId, overrides = {}) => ({
   groupId: 20001,
   senderId: 10001,
   senderName: '小明',
-  time: 1793374000 + messageId,
+  time: Math.floor(Date.now() / 1000) - 60 + messageId,
   text: `消息 ${messageId}`,
   messageId,
   ...overrides,
@@ -55,7 +55,7 @@ test('archive stores, dedupes, searches, and prunes', async () => {
 
     archive.close();
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });
 
@@ -72,7 +72,7 @@ test('archive search returns newest first', async () => {
     assert.equal(rows.at(-1).msg_id, 10);
     archive.close();
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });
 
@@ -97,7 +97,7 @@ test('search returns time_unix and direction for the digest', async () => {
     assert.equal(withOutbound.total, 1, 'outbound rows never count as a speaker');
     archive.close();
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });
 
@@ -117,6 +117,6 @@ test('saved media paths are linked to the archived message', async () => {
     assert.equal(archive.attachMedia(key, ''), false);
   } finally {
     archive.close?.();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });
