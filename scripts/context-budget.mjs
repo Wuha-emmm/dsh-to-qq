@@ -35,8 +35,8 @@ const notes = Array.from({ length: 8 }, (_, index) => ({
 }));
 const cardBlock = renderCard({
   card: { notes, persona: { text: persona, at: 1 } },
-  name: '呜哈',
-  qq: 1363309111,
+  name: '小明',
+  qq: 10001,
 });
 const stickers = Array.from({ length: 60 }, (_, index) => ({
   md5: String(index).padStart(32, '0'),
@@ -61,7 +61,7 @@ for (let index = 0; index < turns * messagesPerTurn; index += 1) {
   });
 }
 
-const ask = '【当前提问】呜哈(1363309111): 帮我看一下今天大家聊了什么，顺便把记忆卡发群里';
+const ask = '【当前提问】小明(10001): 帮我看一下今天大家聊了什么，顺便把记忆卡发群里';
 
 /** Old behaviour: every block, every turn. */
 function oldTurn(turnIndex) {

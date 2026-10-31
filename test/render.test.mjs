@@ -46,7 +46,7 @@ test('returns a base64 payload for OneBot image segments', { skip: !windows }, a
 });
 
 test('the card title carries the name and the QQ number', () => {
-  assert.equal(cardTitle('呜哈', 1363309111), '【呜哈】QQ 1363309111');
+  assert.equal(cardTitle('小明', 123456789), '【小明】QQ 123456789');
   assert.equal(cardTitle('  老白  ', 20002), '【老白】QQ 20002');
   assert.equal(cardTitle('', 20002), 'QQ 20002');
   assert.equal(cardTitle(undefined, 20002), 'QQ 20002');
