@@ -112,7 +112,8 @@ export function defaults() {
     },
     archive: {
       enabled: true,
-      media: false,
+      /** Persist inbound images so a later history review can open them. */
+  media: true,
       retentionDays: 30,
   /** Media files age out faster than the rows that reference them. */
   mediaRetentionDays: 7,

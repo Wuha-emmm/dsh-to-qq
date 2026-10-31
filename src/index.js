@@ -38,7 +38,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.54.0';
+const VERSION = '0.54.1';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -838,7 +838,7 @@ export function apply(ctx) {
   // Search the archive: "what was said", "find that image", "what did X say".
   ctx.effect(() => ctx.tools.register({
     name: 'qq_history',
-    description: 'Search archived QQ messages: who said what, when (Beijing time). Use it for questions about earlier conversations, locating a past image or file, or checking what a specific person said.',
+    description: 'Search archived QQ messages: who said what, when (Beijing time). Rows with media carry the saved absolute path; open it with read_image (or read) when the content matters. Use it for questions about earlier conversations, locating a past image or file, or checking what a specific person said.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -868,7 +868,7 @@ export function apply(ctx) {
       });
       if (rows.length === 0) return { report: '没有匹配的记录。', rows: 0 };
       const report = rows
-        .map(row => `${row.time_bj} [${row.scene}] ${row.sender_name}(${row.sender_id})${row.media_kind === null ? '' : ` [${row.media_kind}]`}: ${row.text}`)
+        .map(row => `${row.time_bj} [${row.scene}] ${row.sender_name}(${row.sender_id})${row.media_kind === null ? '' : ` [${row.media_kind}]`}${row.media_path === null || row.media_path === undefined ? '' : ` (文件: ${row.media_path})`}: ${row.text}`)
         .join('\n');
       return { report, rows: rows.length };
     },
@@ -961,6 +961,7 @@ export function apply(ctx) {
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
 }
+
 
 
 

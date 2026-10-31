@@ -1172,6 +1172,9 @@ export class Bridge {
           }
         }
       }
+      // Keep the paths on the archived row so a later history review can open
+      // the actual image instead of guessing from a [图片] placeholder.
+      if (savedPaths.length > 0) this.archive?.attachMedia?.(message.key, savedPaths.join(';'));
       const savedNote = savedPaths.length === 0 ? '' : `；已存档：${savedPaths.join('、')}`;
       const gifNote = sheets.length === 0
         ? ''

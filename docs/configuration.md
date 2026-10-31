@@ -107,7 +107,7 @@
 | 键 | 默认值 | 范围 | 说明 |
 |---|---|---|---|
 | `enabled` | `true` | — | 是否记录聊天档案 |
-| `media` | `false` | — | 把收到的图片存到本地 media/ |
+| `media` | `true` | — | 把收到的图片存到本地 media/ |
 | `retentionDays` | `30` | `0 ~ 3650` | 档案与媒体的保留天数（0 = 永久） |
 | `mediaRetentionDays` | `7` | `0 ~ 3650` |  |
 

@@ -69,7 +69,8 @@ export async function openArchive(file) {
       reply_to TEXT,
       media_kind TEXT,
       direction TEXT NOT NULL DEFAULT 'in',
-      reasoning TEXT
+      reasoning TEXT,
+      media_path TEXT
     );
     CREATE INDEX IF NOT EXISTS messages_scene_time ON messages (scene, time_unix);
     CREATE INDEX IF NOT EXISTS messages_sender_time ON messages (sender_id, time_unix);
@@ -94,6 +95,9 @@ export async function openArchive(file) {
   }
   if (!columns.includes('reasoning')) {
     db.exec('ALTER TABLE messages ADD COLUMN reasoning TEXT');
+  }
+  if (!columns.includes('media_path')) {
+    db.exec('ALTER TABLE messages ADD COLUMN media_path TEXT');
   }
   db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)').run('schema', String(SCHEMA_VERSION));
   return new Archive(db);
@@ -140,8 +144,8 @@ class Archive {
     try {
       const result = this.db.prepare(`
         INSERT OR IGNORE INTO messages
-          (key, self_id, kind, scene, peer_id, group_id, sender_id, sender_name, time_unix, time_bj, text, msg_id, reply_to, media_kind, direction, reasoning)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (key, self_id, kind, scene, peer_id, group_id, sender_id, sender_name, time_unix, time_bj, text, msg_id, reply_to, media_kind, direction, reasoning, media_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         record.key,
         record.selfId,
@@ -159,6 +163,7 @@ class Archive {
         record.mediaKind ?? null,
         record.direction ?? 'in',
         record.reasoning ?? null,
+        record.mediaPath ?? null,
       );
       if (result.changes > 0) this.inserted += 1;
       return result.changes > 0;
@@ -240,6 +245,24 @@ class Archive {
   }
 
   /**
+   * Link saved media files to the message they came from.
+   *
+   * @param {string} key Message key.
+   * @param {string} path Absolute paths joined by ';'.
+   * @returns {boolean} True when the row was updated.
+   */
+  attachMedia(key, path) {
+    const joined = String(path ?? '').trim();
+    if (joined === '') return false;
+    try {
+      const result = this.db.prepare('UPDATE messages SET media_path = ? WHERE key = ?').run(joined, String(key));
+      return result.changes > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Read the most recent turns, newest first.
    *
    * @param {number} [limit] Maximum rows.
@@ -288,7 +311,7 @@ class Archive {
       params.push(`%${query.keyword}%`);
     }
     const limit = Number.isInteger(query.limit) ? Math.min(20_000, Math.max(1, query.limit)) : 20;
-    const sql = `SELECT scene, sender_id, sender_name, time_unix, time_bj, text, msg_id, media_kind, direction
+    const sql = `SELECT scene, sender_id, sender_name, time_unix, time_bj, text, msg_id, media_kind, media_path, direction
                  FROM messages ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
                  ORDER BY time_unix DESC LIMIT ?`;
     return this.db.prepare(sql).all(...params, limit);

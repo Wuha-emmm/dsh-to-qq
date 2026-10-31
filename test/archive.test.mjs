@@ -101,3 +101,22 @@ test('search returns time_unix and direction for the digest', async () => {
   }
 });
 
+test('saved media paths are linked to the archived message', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-to-qq-arch-'));
+  const archive = await openArchive(join(dir, 'a.db'));
+  try {
+    const key = 'self:media';
+    archive.insert({
+      key, selfId: 1, kind: 'group', scene: 'group:2', peerId: 2, groupId: 2,
+      senderId: 3, senderName: '甲', time: Math.floor(Date.now() / 1000),
+      text: '[图片]', messageId: 11, mediaKind: 'image', direction: 'in',
+    });
+    assert.equal(archive.attachMedia(key, 'C:/media/a.png;C:/media/b.png'), true);
+    const row = archive.search({ scene: 'group:2', limit: 1 })[0];
+    assert.equal(row.media_path, 'C:/media/a.png;C:/media/b.png');
+    assert.equal(archive.attachMedia(key, ''), false);
+  } finally {
+    archive.close?.();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
