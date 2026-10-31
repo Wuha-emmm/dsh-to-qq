@@ -5,6 +5,8 @@
  * is what a human actually types — this tool lets the model answer that.
  */
 
+import { filterNotes } from '../memory/sensitive.js';
+
 /**
  * Register the tool.
  *
@@ -53,8 +55,8 @@ export function registerMemoryCardTool(ctx, options) {
         name,
         persona: card.persona?.text ?? '',
         // The image path is the last line of defence: a note that slipped into
-      // storage still must not be drawn.
-      notes: filterNotes(card.notes ?? []).notes,
+        // storage still must not be drawn.
+        notes: filterNotes(card.notes ?? []).notes,
         admin: options.store.get().access.admins.some(admin => admin.qq === target),
         sceneLabel: await sceneLabelFor(bridge.client, info.scene),
       }, { log: options.log, backdropDir: bridge.mediaDir });
