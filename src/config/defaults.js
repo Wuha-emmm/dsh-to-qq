@@ -76,7 +76,7 @@ export function defaults() {
   /** Archive the session a rebuild replaces, so the sidebar does not grow forever. */
   archiveOldSessions: true,
   /** Rebuild a saved session bigger than this many KB at startup; 0 disables. */
-  autoRebuildKb: 60,
+  autoRebuildKb: 200,
   /** Tell the model not to repeat what other group members said. */
   groupPrivacy: true,
     },

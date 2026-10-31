@@ -62,7 +62,7 @@
 | `groupCharCap` | `6000` | `500 ~ 40000` | 注入群上下文的字数上限 |
 | `cleanupKeepHours` | `24` | — |  |
 | `archiveOldSessions` | `true` | — |  |
-| `autoRebuildKb` | `60` | — |  |
+| `autoRebuildKb` | `200` | — |  |
 | `groupPrivacy` | `true` | — |  |
 
 ## memory
