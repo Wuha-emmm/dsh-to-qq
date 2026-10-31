@@ -212,3 +212,7 @@ WBI 签名：从 `nav` 取 `wbi_img` 两个 key，按固定置换表混成 32 �
 | caption 超过 30 字 | 截断成 30 字 + 省略号，返回值提示“剩下的写进正文” |
 
 合并时图片最多 4 张同一条，多余的与文件各自单独发。失败路径也会 flush，图不会卡在队列里。`qq_send` 现在同时写入档案，之前它发出的内容完全不入档。
+
+**不允许绕路**：`pwsh` 里出现 `send_private_msg` / `send_group_msg` / `upload_private_file` / `upload_group_file` 会被 guard 直接拒绝并提示改用 `qq_send`。这条是 08:00 那次“两张图”的根因：模型先 `upload_private_file`（已投递一次），再 `send_private_msg` 带同一文件（又投递一次），两个文件名不同、内容相同。
+
+面板里发起的回合此前 `qq_send` 报 “not bound”：`sessionContext` 查不到时现在会按 `sessions.json` 的绑定反查场景并缓存，所以界面里也能正常发图。

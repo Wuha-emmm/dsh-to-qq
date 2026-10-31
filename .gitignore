@@ -35,3 +35,6 @@ coverage/
 /shot-*.png
 /crop-*.png
 /names-row*.png
+
+# Desktop captures from automation runs
+/desk-*.png

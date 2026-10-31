@@ -39,12 +39,13 @@ import { registerDigestTool } from './tools/digest.js';
 import { openArchive } from './archive/db.js';
 import { PetClient } from './pet/client.js';
 import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
+import { rawSendRefusal } from './policy/raw-send.js';
 
 /** Required services: tools, the session driver, and the HTTP carrier for the panel. */
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.78.0';
+const VERSION = '0.78.1';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -336,7 +337,14 @@ export function apply(ctx) {
       .then(() => rename(temporary, quotaFile))
       .catch(error => log(`quota save failed: ${error?.message ?? error}`));
   }, 30_000);
-  // Dangerous tools called from a QQ session need an explicit `/yes` first.
+  // Calling the OneBot API directly bypasses the bridge: nothing is archived, the
+// tier rules are skipped, and a file can be delivered twice.
+ctx.effect(() => ctx.tools.guard(execution => {
+  if (execution?.name !== 'pwsh') return undefined;
+  return rawSendRefusal(String(execution?.arguments?.command ?? ''));
+}));
+
+// Dangerous tools called from a QQ session need an explicit `/yes` first.
   ctx.effect(() => ctx.tools.guard(execution => {
     if (store.get().safety.confirmWrite !== true) return undefined;
     const info = bridge.sessionContext(String(execution?.agent?.id ?? ''));
@@ -1221,6 +1229,7 @@ export function apply(ctx) {
     log,
   }));
 }
+
 
 
 
