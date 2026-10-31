@@ -50,6 +50,8 @@ export function defaults() {
       admins: [],
       /** ignore | notice | block */
       strangerPolicy: 'ignore',
+      /** Treat the bot's QQ friends (non-admin DMs) as members instead of strangers. */
+      friendsAsMember: true,
       /** whitelist | blacklist | all */
       groupMode: 'whitelist',
       /** @type {number[]} */

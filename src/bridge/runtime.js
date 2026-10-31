@@ -384,6 +384,9 @@ export class Bridge {
     this.continuedSessions = new Set();
     /** How often DSH condensed a session and when; shown by qq_status. */
     this.compactionStats = { count: 0, lastAt: 0 };
+    /** The bot's QQ friends, so a non-admin DM is not a stranger. */
+    this.friends = new Set();
+    this.friendsSyncedAt = 0;
     /** Scenes whose next session continues a rebuilt one. */
     this.pendingContinue = new Set();
     /** group id -> display name, so a title costs one call. */
@@ -996,7 +999,12 @@ export class Bridge {
     }
     this.#remember(message.key);
 
-    const decision = admit(message, config);
+    let isFriend = false;
+    if (message.kind === 'dm' && config.access.admins.every(admin => admin.qq !== message.senderId)) {
+      await this.#ensureFriends();
+      isFriend = this.friends.has(message.senderId);
+    }
+    const decision = admit(message, config, isFriend);
     if (decision.accepted !== true) {
       this.counters.ignored += 1;
       if (decision.reason === 'stranger-notice' && message.kind === 'dm') {
@@ -1527,6 +1535,33 @@ export class Bridge {
     await writeFile(temporary, body, 'utf8');
     await rename(temporary, target);
   }
+  /**
+   * Refresh the QQ friend list at most every 30 minutes.
+   *
+   * A friend (non-admin DM) is answered as a member; anyone who never added the
+   * bot stays a stranger. The first call blocks, later calls are throttled.
+   *
+   * @returns {Promise<void>} Resolves after the attempt.
+   */
+  async #ensureFriends() {
+    if (this.client === undefined) return;
+    if (this.friendsSyncedAt > 0 && Date.now() - this.friendsSyncedAt < 30 * 60_000) return;
+    try {
+      const data = await this.client.call('get_friend_list', {}, { timeoutMs: 8000 });
+      const list = Array.isArray(data) ? data : (data?.data ?? data?.friends ?? []);
+      const next = new Set();
+      for (const item of list) {
+        const id = Number(item?.user_id ?? item?.userId ?? 0);
+        if (id > 0) next.add(id);
+      }
+      this.friends = next;
+      this.friendsSyncedAt = Date.now();
+      this.log(`friends synced: ${next.size}`);
+    } catch (error) {
+      this.log(`friend list failed: ${String(error?.message ?? error).slice(0, 100)}`);
+    }
+  }
+
   /**
    * Injection state for one scene; a new session starts from scratch.
    *

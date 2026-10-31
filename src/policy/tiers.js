@@ -52,7 +52,7 @@ export function blockedWord(text, config) {
   return '';
 }
 
-export function admit(message, config) {
+export function admit(message, config, isFriend = false) {
   const access = config.access;
   const isAdmin = access.admins.some(admin => admin.qq === message.senderId);
 
@@ -60,6 +60,9 @@ export function admit(message, config) {
 
   if (message.kind === 'dm') {
     if (isAdmin) return { accepted: true };
+    // A friend is a known principal, not a stranger: only people who never
+    // added the bot (or whom it never added) fall through to the policy.
+    if (isFriend && access.friendsAsMember !== false) return { accepted: true };
     if (access.strangerPolicy === 'ignore') return { accepted: false, reason: 'stranger-ignored' };
     if (access.strangerPolicy === 'notice') return { accepted: false, reason: 'stranger-notice' };
     return { accepted: false, reason: 'stranger-blocked' };

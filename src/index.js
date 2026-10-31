@@ -39,7 +39,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.59.1';
+const VERSION = '0.60.0';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -1063,6 +1063,7 @@ export function apply(ctx) {
           if (last === undefined) return 'usage: 还没有记录';
           return `usage: 上一轮 输入 ${last.input_tokens} / 输出 ${last.output_tokens} / 缓存 ${last.cache_tokens}`;
         })(),
+        (() => `friends: ${bridge.friendsSyncedAt === 0 ? '未同步' : `${bridge.friends.size} 个`}`)(),
         (() => {
           const stats = bridge.compactionStats ?? { count: 0, lastAt: 0 };
           return stats.count === 0
@@ -1082,6 +1083,7 @@ export function apply(ctx) {
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
 }
+
 
 
 

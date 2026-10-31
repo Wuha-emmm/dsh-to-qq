@@ -134,4 +134,11 @@ test('defaults keep the documented runtime shape', () => {
   assert.equal(defaults().limits.replyDelayMs, 2000);
 });
 
-
+test('a QQ friend is answered as a member, a stranger is not', () => {
+  const config = mergeConfig({ access: { admins: [{ qq: 10001, name: 'me', addedAt: 0 }], strangerPolicy: 'ignore', friendsAsMember: true } });
+  const friendDm = normalizeEvent(dmEvent({ user_id: 555, sender: { user_id: 555, nickname: '好友' } }));
+  assert.deepEqual(admit(friendDm, config, true), { accepted: true });
+  assert.equal(admit(friendDm, config, false).reason, 'stranger-ignored');
+  const strict = mergeConfig({ access: { ...config.access, friendsAsMember: false } });
+  assert.equal(admit(friendDm, strict, true).reason, 'stranger-ignored');
+});

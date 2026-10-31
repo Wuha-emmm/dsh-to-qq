@@ -33,6 +33,7 @@
 |---|---|---|---|
 | `admins` | `[]` | — | 管理员 QQ 列表，私聊拥有全权 |
 | `strangerPolicy` | `ignore` | — | 陌生人私聊：ignore / notice / block |
+| `friendsAsMember` | `true` | — |  |
 | `groupMode` | `whitelist` | — | 群策略：whitelist / blacklist / all |
 | `groups` | `[]` | — | 参与策略的群号列表 |
 | `mentionOnly` | `true` | — | 群里必须 @ 机器人才回应 |
