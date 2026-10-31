@@ -273,6 +273,9 @@ export class DshDriver {
     let turnReason;
     /** @type {any} Token usage reported by the last assistant message. */
     let usage;
+    /** Successful tool calls billed per request by the provider. */
+    let searchCalls = 0;
+    let fetchCalls = 0;
 
     /** Resolves when the turn ends, fails, or the stream closes. */
     let settle;
@@ -307,6 +310,9 @@ export class DshDriver {
           if (type === 'turn/start' && ourTurnStart === -1 && seq > baseline) ourTurnStart = seq;
 
           const base = promptSeq !== -1 ? promptSeq : ourTurnStart;
+          const callName = type === 'tool/call' ? String(event.data?.name ?? event.data?.toolName ?? '') : '';
+          if (callName === 'web_search') searchCalls += 1;
+          if (callName === 'web_fetch') fetchCalls += 1;
           if (type === 'assistant/message' && base !== -1 && seq > base) {
             usage = event.data?.message?.usage ?? event.data?.usage ?? usage;
             for (const block of event.data?.message?.content ?? []) {
@@ -391,7 +397,7 @@ export class DshDriver {
     const text = reply.trim();
     const failure = turnReason?.kind === 'error' ? turnReason.error?.message : undefined;
     if (text === '' && failure !== undefined) throw new Error(`agent failed: ${failure}`);
-    return { sessionId, text, reasoning: reasoning.trim(), sessionBound: true, usage };
+    return { sessionId, text, reasoning: reasoning.trim(), sessionBound: true, usage, searchCalls, fetchCalls };
   }
 }
 

@@ -42,6 +42,8 @@
 
 | 键 | 默认值 | 范围 | 说明 |
 |---|---|---|---|
+| `searchPrice` | `0.005` | `0 ~ 100` |  |
+| `fetchPrice` | `0.005` | `0 ~ 100` |  |
 | `offPeakDiscount` | `0.5` | `0 ~ 1` |  |
 | `peakWindows` | `09:00-12:00,14:00-18:00` | — |  |
 | `peakHolidays` | `""`（空） | — |  |
@@ -105,6 +107,8 @@
 |---|---|---|---|
 | `imageThreshold` | `500` | `100 ~ 5000` | 回答超过该字数就转成图片 |
 | `maxReplyChars` | `250` | `0 ~ 4000` |  |
+| `replyCharsOwner` | `400` | `0 ~ 4000` |  |
+| `replyCharsGroup` | `300` | `0 ~ 4000` |  |
 | `style` | `light` | — | 图片风格：light / dark / bubble |
 | `fontSize` | `22` | `14 ~ 48` | 转图字号 |
 | `width` | `1080` | `600 ~ 2000` | 转图宽度（像素） |

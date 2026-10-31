@@ -59,6 +59,9 @@ export function defaults() {
       blockedWords: [],
     },
     models: {
+      /** CNY per successful web_search / web_fetch call. */
+      searchPrice: 0.005,
+      fetchPrice: 0.005,
       /** Off-peak prices are this fraction of the peak ones (DeepSeek: 0.5). */
       offPeakDiscount: 0.5,
       /** Off-peak window in local time; empty disables the discount. */
@@ -117,6 +120,9 @@ export function defaults() {
       imageThreshold: 500,
   /** The model is asked to stay within this many characters; longer replies render as an image. 0 = no hint. */
   maxReplyChars: 250,
+  /** Per-scene reply limits; 0 falls back to maxReplyChars. */
+  replyCharsOwner: 400,
+  replyCharsGroup: 300,
       /** light | dark | bubble */
       style: 'light',
       fontSize: 22,
@@ -207,6 +213,10 @@ export const RANGES = {
   'models.inputPrice': [0, 1000],
   'models.outputPrice': [0, 1000],
   'models.cachePrice': [0, 1000],
+  'models.searchPrice': [0, 100],
+  'models.fetchPrice': [0, 100],
+  'output.replyCharsOwner': [0, 4000],
+  'output.replyCharsGroup': [0, 4000],
   'models.offPeakDiscount': [0, 1],
 };
 
@@ -241,7 +251,8 @@ export function normalize(config) {
     const value = Number(config[section][key]);
     // Prices and discounts keep their decimals; everything else is a whole number.
     const fractional = path === 'models.inputPrice' || path === 'models.outputPrice'
-      || path === 'models.cachePrice' || path === 'models.offPeakDiscount';
+      || path === 'models.cachePrice' || path === 'models.offPeakDiscount'
+      || path === 'models.searchPrice' || path === 'models.fetchPrice';
     config[section][key] = Number.isFinite(value) ? Math.min(max, Math.max(min, fractional ? value : Math.round(value))) : min;
   }
 

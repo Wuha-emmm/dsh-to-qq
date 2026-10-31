@@ -13,7 +13,7 @@ test('cost uses each price bucket', () => {
     { input: 1, output: 2, cache: 0.1 },
     fridayPeak,
   );
-  assert.deepEqual(estimate, { input: 1_000_000, output: 500_000, cache: 2_000_000, cost: 2.2, offPeak: false });
+  assert.deepEqual(estimate, { input: 1_000_000, output: 500_000, cache: 2_000_000, calls: 0, cost: 2.2, offPeak: false });
 });
 
 test('missing prices leave the cost unknown instead of zero', () => {
@@ -42,8 +42,8 @@ test('the ledger stores tokens per turn and totals them', async () => {
     assert.equal(rows.length, 2);
     assert.equal(rows[0].input_tokens, 400);
     assert.equal(rows[1].cache_tokens, 800);
-    assert.deepEqual(archive.usageTotals(now - 10_000), { turns: 2, input: 1600, output: 400, cache: 1000 });
-    assert.deepEqual(archive.usageTotals(now - 500), { turns: 1, input: 400, output: 100, cache: 200 });
+    assert.deepEqual(archive.usageTotals(now - 10_000), { turns: 2, input: 1600, output: 400, cache: 1000, search: 0, fetch: 0 });
+    assert.deepEqual(archive.usageTotals(now - 500), { turns: 1, input: 400, output: 100, cache: 200, search: 0, fetch: 0 });
   } finally {
     archive.close?.();
     await rm(dir, { recursive: true, force: true });
@@ -69,4 +69,18 @@ test('peak is weekday work hours, with lunch and holidays off', () => {
   assert.equal(isPeak(new Date(2026, 10, 1, 10, 0).getTime()), false, 'Sunday');
   assert.equal(isPeak(new Date(2026, 9, 30, 10, 0).getTime(), { holidays: '2026-10-30' }), false, 'holiday');
   void friday;
+});
+
+test('each search or fetch call costs its configured price', () => {
+  const prices = { input: 2, output: 8, cache: 0.04, searchPrice: 0.005, fetchPrice: 0.005 };
+  const peak = new Date(2026, 9, 30, 10, 0).getTime();
+  const estimate = estimateCost({}, prices, peak, { searchCalls: 2, fetchCalls: 3 });
+  assert.equal(estimate.calls, 5);
+  assert.equal(Number(estimate.cost.toFixed(4)), 0.025);
+});
+
+test('calls are billed even when token prices are configured at zero', () => {
+  const prices = { input: 0, output: 0, cache: 0, searchPrice: 0.005 };
+  const estimate = estimateCost({}, prices, Date.now(), { searchCalls: 1 });
+  assert.equal(estimate.cost, null, 'no token price means the estimate stays unknown');
 });

@@ -51,26 +51,32 @@ export function isPeak(at, schedule = {}) {
  * Cost of one usage record.
  *
  * @param {{ inputTokens?: number, outputTokens?: number, cacheReadTokens?: number }} usage Usage.
- * @param {{ input?: number, output?: number, cache?: number, offPeakDiscount?: number, peakWindows?: string, peakHolidays?: string }} prices ¥ per 1M tokens (peak), discount and peak schedule.
+ * @param {{ input?: number, output?: number, cache?: number, offPeakDiscount?: number, peakWindows?: string, peakHolidays?: string, searchPrice?: number, fetchPrice?: number }} prices Token prices, schedule and per-call prices.
  * @param {number} [at] Epoch milliseconds of the turn; decides peak or off-peak.
- * @returns {{ input: number, output: number, cache: number, cost: number | null, offPeak: boolean }} Tokens and ¥.
+ * @param {{ searchCalls?: number, fetchCalls?: number }} [calls] Successful tool calls billed per request.
+ * @returns {{ input: number, output: number, cache: number, calls: number, cost: number | null, offPeak: boolean }} Tokens, calls and ¥.
  */
-export function estimateCost(usage, prices, at = Date.now()) {
+export function estimateCost(usage, prices, at = Date.now(), calls = {}) {
   const input = Number(usage?.inputTokens) || 0;
   const output = Number(usage?.outputTokens) || 0;
   const cache = Number(usage?.cacheReadTokens) || 0;
   const pIn = Number(prices?.input);
   const pOut = Number(prices?.output);
   const pCache = Number(prices?.cache);
+  const search = Math.max(0, Number(calls?.searchCalls) || 0);
+  const fetch = Math.max(0, Number(calls?.fetchCalls) || 0);
+  const callCount = search + fetch;
   if (!Number.isFinite(pIn) || !Number.isFinite(pOut) || !Number.isFinite(pCache) || (pIn === 0 && pOut === 0 && pCache === 0)) {
-    return { input, output, cache, cost: null, offPeak: false };
+    return { input, output, cache, calls: callCount, cost: null, offPeak: false };
   }
   const offPeak = !isPeak(at, { windows: prices?.peakWindows, holidays: prices?.peakHolidays });
   // No configured discount means the schedule does not apply at all.
   const configured = Number(prices?.offPeakDiscount);
   const discount = offPeak && Number.isFinite(configured) && configured > 0 && configured < 1 ? configured : 1;
-  const cost = (input * pIn + output * pOut + cache * pCache) / 1_000_000 * discount;
-  return { input, output, cache, cost, offPeak };
+  // Search/Fetch are billed per successful request, regardless of the hour.
+  const callCost = search * (Number(prices?.searchPrice) || 0) + fetch * (Number(prices?.fetchPrice) || 0);
+  const tokenCost = (input * pIn + output * pOut + cache * pCache) / 1_000_000 * discount;
+  return { input, output, cache, calls: callCount, cost: tokenCost + callCost, offPeak };
 }
 
 /**

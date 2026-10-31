@@ -597,6 +597,10 @@ window.__ModuleLoader__.load({
           { path: 'digest.minute', label: '日报时间 · 分（0-59）', type: 'number' },
           { path: 'output.imageThreshold', label: '转图阈值（字）', type: 'number' },
       { path: 'output.maxReplyChars', label: '回复长度上限（字）', type: 'number' },
+      { path: 'output.replyCharsOwner', label: '私聊回复上限 (字)', type: 'number' },
+      { path: 'output.replyCharsGroup', label: '群聊回复上限 (字)', type: 'number' },
+      { path: 'models.searchPrice', label: 'Search 每次 (元)', type: 'number' },
+      { path: 'models.fetchPrice', label: 'Fetch 每次 (元)', type: 'number' },
           {
             path: 'output.style',
             label: '图片样式',
@@ -861,7 +865,7 @@ window.__ModuleLoader__.load({
             h('div', { style: UI.muted },
               today === undefined
                 ? '读取中…'
-                : `${today.turns} 轮（谷时 ${today.offPeakTurns ?? 0}） · 输入 ${today.input} / 输出 ${today.output} / 缓存命中 ${today.cache}（${pct(today.cacheRate)}） · ${money(today.cost)}`)),
+                : `${today.turns} 轮（谷时 ${today.offPeakTurns ?? 0}） · 输入 ${today.input} / 输出 ${today.output} / 缓存命中 ${today.cache}（${pct(today.cacheRate)}） · 检索 ${today.calls ?? 0} 次 · ${money(today.cost)}`)),
           h('button', { type: 'button', onClick: load, style: UI.ghost }, '刷新')),
         h('div', { style: { ...UI.muted, margin: '6px 0 10px' } },
           data?.prices !== undefined && data.prices.input === 0 && data.prices.output === 0 && data.prices.cache === 0
@@ -870,19 +874,21 @@ window.__ModuleLoader__.load({
         data?.recent === undefined || data.recent.length === 0
           ? h('div', { style: UI.muted }, '还没有记录。下一轮对话后这里会出现数据。')
           : h('div', { style: { fontSize: 11.5, lineHeight: 1.9 } },
-            h('div', { style: { ...UI.muted, display: 'grid', gridTemplateColumns: '1.4fr .8fr .7fr .7fr .6fr .6fr', gap: 8 } },
+            h('div', { style: { ...UI.muted, display: 'grid', gridTemplateColumns: '1.4fr .8fr .7fr .7fr .6fr .5fr .6fr', gap: 8 } },
               h('span', { key: 'a' }, '场景'), h('span', { key: 'b' }, '时间'),
               h('span', { key: 'c' }, '输入'), h('span', { key: 'd' }, '输出'),
+              h('span', { key: 'g' }, '检索'),
               h('span', { key: 'e' }, '缓存'), h('span', { key: 'f' }, '费用')),
             data.recent.slice(0, 15).map(row => h('div', {
               key: `${row.scene}-${row.startedAt}`,
-              style: { display: 'grid', gridTemplateColumns: '1.4fr .8fr .7fr .7fr .6fr .6fr', gap: 8 },
+              style: { display: 'grid', gridTemplateColumns: '1.4fr .8fr .7fr .7fr .6fr .5fr .6fr', gap: 8 },
             },
               h('span', { key: 'a' }, row.scene),
               h('span', { key: 'b' }, `${new Date(row.startedAt).toLocaleTimeString('zh-CN', { hour12: false })}${row.offPeak ? ' 谷' : ''}`),
               h('span', { key: 'c' }, String(row.input)),
               h('span', { key: 'd' }, String(row.output)),
               h('span', { key: 'e' }, pct(row.cacheRate)),
+              h('span', { key: 'g' }, String(row.calls ?? 0)),
               h('span', { key: 'f' }, money(row.cost))))),
         status === '' ? null : h('div', { style: { ...UI.muted, marginTop: 8 } }, status));
     };

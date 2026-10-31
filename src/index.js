@@ -39,7 +39,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.57.3';
+const VERSION = '0.58.0';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -763,6 +763,8 @@ export function apply(ctx) {
           offPeakDiscount: Number(store.get().models.offPeakDiscount) || 0,
           peakWindows: String(store.get().models.peakWindows ?? ''),
           peakHolidays: String(store.get().models.peakHolidays ?? ''),
+          searchPrice: Number(store.get().models.searchPrice) || 0,
+          fetchPrice: Number(store.get().models.fetchPrice) || 0,
         };
         const rows = bridge.archive?.recentTurns?.(30) ?? [];
         const recent = rows.map(row => {
@@ -783,6 +785,7 @@ export function apply(ctx) {
             cacheRate: cacheRate(estimate),
             cost: estimate.cost,
             offPeak: estimate.offPeak,
+            calls: estimate.calls,
           };
         });
         const midnight = new Date();
@@ -793,6 +796,7 @@ export function apply(ctx) {
           { inputTokens: row.input_tokens, outputTokens: row.output_tokens, cacheReadTokens: row.cache_tokens },
           prices,
           row.started_at,
+          { searchCalls: row.search_calls, fetchCalls: row.fetch_calls },
         ));
         send(200, {
           prices,
@@ -800,6 +804,7 @@ export function apply(ctx) {
             ...totals,
             cost: dayEstimates.every(item => item.cost !== null) ? dayEstimates.reduce((sum, item) => sum + (item.cost ?? 0), 0) : null,
             offPeakTurns: dayEstimates.filter(item => item.offPeak).length,
+            calls: dayEstimates.reduce((sum, item) => sum + (item.calls ?? 0), 0),
             cacheRate: cacheRate(totals),
           },
           recent,
@@ -1068,6 +1073,7 @@ export function apply(ctx) {
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
 }
+
 
 
 

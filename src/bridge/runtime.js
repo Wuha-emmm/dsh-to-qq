@@ -1093,6 +1093,8 @@ export class Bridge {
     let replyChars = 0;
     /** Token usage of the last assistant message, for the ledger. */
     let turnUsage = null;
+    let turnSearchCalls = 0;
+    let turnFetchCalls = 0;
     let turnOk = false;
     try {
       if (config.output.sendProcessingHint) await this.sendText(message, '收到，正在处理…');
@@ -1229,7 +1231,11 @@ export class Bridge {
       // Sticker catalog: only when the tool is available for this tier.
       const stickerNote = this.stickerBlock(message.scene, injection);
       // Reply length: asked once per session; the image path enforces it.
-      const lengthLimit = Number(config.output.maxReplyChars) || 0;
+      const baseLimit = Number(config.output.maxReplyChars) || 0;
+      const tierLimit = tier === 'owner'
+        ? Number(config.output.replyCharsOwner) || 0
+        : Number(config.output.replyCharsGroup) || 0;
+      const lengthLimit = tierLimit > 0 ? tierLimit : baseLimit;
       const lengthNote = lengthLimit > 0
         ? injection.fixed('length', `【回复长度】尽量控制在 ${lengthLimit} 字以内；内容较长时正常输出，我会自动转成图片发出去。`)
         : '';
@@ -1269,6 +1275,8 @@ export class Bridge {
         },
       });
       turnUsage = result.usage ?? null;
+      turnSearchCalls = Number(result.searchCalls) || 0;
+      turnFetchCalls = Number(result.fetchCalls) || 0;
       // A card is the answer: drop the "已发送" text that usually follows it.
       const cardSent = this.cardsSent > cardsBefore;
       if (shouldStaySilent(result.text, { cardSent })) {
@@ -1279,7 +1287,7 @@ export class Bridge {
         return;
       }
       const body = result.text.trim() === '' ? '（这轮没有文本回复）' : result.text.trim();
-      const limitCandidates = [config.output.imageThreshold, config.output.maxReplyChars]
+      const limitCandidates = [config.output.imageThreshold, lengthLimit]
         .map(value => Number(value) || 0)
         .filter(value => value > 0);
       const replyLimit = limitCandidates.length > 0 ? Math.min(...limitCandidates) : Number.MAX_SAFE_INTEGER;
@@ -1316,6 +1324,8 @@ export class Bridge {
         inputTokens: Number(turnUsage?.inputTokens) || 0,
         outputTokens: Number(turnUsage?.outputTokens) || 0,
         cacheTokens: Number(turnUsage?.cacheReadTokens) || 0,
+        searchCalls: turnSearchCalls,
+        fetchCalls: turnFetchCalls,
         ok: turnOk,
       });
       release();
