@@ -15,6 +15,8 @@ const ALIASES = new Map([
   ['list', 'list'],
   ['切换', 'switch'],
   ['switch', 'switch'],
+  ['重建', 'rebuild'],
+  ['rebuild', 'rebuild'],
   ['新建', 'new'],
   ['new', 'new'],
   ['状态', 'status'],

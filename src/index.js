@@ -38,7 +38,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.52.0';
+const VERSION = '0.53.0';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -264,6 +264,13 @@ export function apply(ctx) {
   };
   schedule(syncStickers, 60_000, { once: true });
   schedule(syncStickers, 12 * 3600_000);
+
+  // Sessions that already carry a huge history keep paying for it every turn.
+  // Rebuild them once at startup, carrying their tail into the next message.
+  schedule(() => {
+    const limitKb = Number(store.get().conversation.autoRebuildKb) || 0;
+    void bridge.autoRebuildSessions(limitKb).catch(error => log(`auto rebuild failed: ${error?.message ?? error}`));
+  }, 8_000, { once: true });
 
   // Quota counters live in memory for speed; persist them so a restart does not
   // hand everyone a fresh daily allowance.
@@ -947,6 +954,7 @@ export function apply(ctx) {
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
 }
+
 
 
 

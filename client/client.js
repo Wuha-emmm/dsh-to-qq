@@ -588,6 +588,7 @@ window.__ModuleLoader__.load({
         title: '对话',
         fields: [
       { path: 'conversation.cwd', label: '会话项目文件夹', type: 'text' },
+      { path: 'conversation.autoRebuildKb', label: '会话重建阈值 (KB)', type: 'number' },
           { path: 'conversation.groupHistory', label: '群聊上文条数', type: 'number' },
           { path: 'conversation.groupCharCap', label: '注入字符上限', type: 'number' },
           { path: 'digest.enabled', label: '每天自动发群日报', type: 'checkbox' },
@@ -734,6 +735,7 @@ window.__ModuleLoader__.load({
       'access.mentionOnly': '群里只有 @ 机器人才回应',
       'access.strangerPolicy': '陌生人私聊策略：忽略 / 仅问答',
       'conversation.cwd': 'QQ 会话归到这个文件夹（DSH 侧边栏按它分组）；留空用 DSH 默认',
+      'conversation.autoRebuildKb': '会话历史超过这个大小就在启动时重建，只带走最近几条消息；0 = 关闭',
       'conversation.groupHistory': '每次回答带上的群消息条数',
       'conversation.groupCharCap': '注入上下文的字数上限',
       'digest.enabled': '每天固定时间把群日报图发到群',

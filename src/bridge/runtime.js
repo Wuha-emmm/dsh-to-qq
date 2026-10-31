@@ -12,6 +12,7 @@ import { admit, blockedWord, tierOf } from '../policy/tiers.js';
 import { Quota, Semaphore } from '../policy/quota.js';
 import { SceneBuffer, renderContext } from '../context/buffer.js';
 import { InjectionTracker } from '../context/injection.js';
+import { formatRecap } from '../context/recap.js';
 import { renderCard } from '../memory/store.js';
 import { renderTextImageBase64 } from '../render/text-image.js';
 import { promptImageParts, persistImage, imageSegments, looksLikeSticker, downloadImage } from '../media/inbound.js';
@@ -126,6 +127,11 @@ export class Bridge {
     // One sticker at a time is allowed: the settings page can re-analyse just the
     const only = typeof options.md5 === 'string' ? options.md5.toLowerCase() : '';
     const workers = this.stickers.all().filter(sticker => sticker.url !== '' && (only === '' || sticker.md5 === only));
+    // Descriptions are independent: a fresh session per batch is enough, and
+    // stops a 130-turn session from re-sending every earlier reply each turn.
+    const stickerScene = 'sticker-describe';
+    const resetStickerSession = async () => { await this.map?.remove?.(stickerScene); };
+    await resetStickerSession();
     let previewed = 0;
     let described = 0;
     let repairs = 0;
@@ -190,6 +196,8 @@ export class Bridge {
         this.log(`sticker media failed for ${sticker.md5.slice(0, 6)}: ${this.stickerStats.lastError}`);
       }
     }
+
+    await resetStickerSession();
 
     this.stickerStats.total = this.stickers.size;
     await this.stickers.save().catch(error => this.log(`sticker save failed: ${error?.message ?? error}`));
@@ -357,6 +365,8 @@ export class Bridge {
     this.sessionDetails = new Map();
     /** Bot account; 0 until the first event (or connection.botUin) pins it. */
     this.selfId = 0;
+    /** Recap text waiting for the next message of a rebuilt scene. */
+    this.pendingSeeds = new Map();
     /** Per-scene injection state: which fixed blocks the session already has. */
     this.injections = new Map();
     /** Sessions already renamed in this process. */
@@ -702,6 +712,18 @@ export class Bridge {
         await this.sendText(message, `已切到：${target.title ?? target.id}`);
         return;
       }
+      case 'rebuild': {
+        const outcome = await this.rebuildScene(scene, { reason: 'command' });
+        this.sessionChoices.delete(scene);
+        await this.sendText(
+          message,
+          outcome.recapChars === 0
+            ? '已重建会话，之前的记录没有可续接的消息，下一条会开新会话。'
+            : `已重建会话：带走最近 ${outcome.messages} 条消息作为摘要（${outcome.recapChars} 字），下一条消息自动接上。`,
+        );
+        return;
+      }
+
       case 'new': {
         await this.map?.remove(scene);
         this.sessionChoices.delete(scene);
@@ -1026,9 +1048,13 @@ export class Bridge {
       const savedPaths = [];
       const quoted = await this.#resolveQuote(message);
       const quotedText = quoted?.text;
-      const promptText = tier === 'owner'
+      const promptBase = tier === 'owner'
         ? this.#privatePrompt(message, config, card, quotedText)
         : this.#groupPrompt(message, config, card, quotedText, injection);
+      // A rebuilt scene carries its tail exactly once, with the next message.
+      const seed = this.pendingSeeds.get(message.scene);
+      if (seed !== undefined) this.pendingSeeds.delete(message.scene);
+      const promptText = seed === undefined ? promptBase : `${seed}\n\n${promptBase}`;
       const stickers = imageSegments(message.segments).filter(looksLikeSticker).length;
       // Voice: QQ's own ASR first, then a local speech provider, then a command.
       const voices = voiceSegments(message.segments);
@@ -1232,6 +1258,55 @@ export class Bridge {
    * @param {import('./events.js').QQMessage} message The message.
    * @returns {string} The block, or an empty string when the card is empty.
    */
+  /**
+   * Drop a scene's session and hand its tail to the next message.
+   *
+   * @param {string} scene Scene key.
+   * @param {{ reason?: string, limit?: number }} [options] Wiring.
+   * @returns {Promise<{ recapChars: number, messages: number }>} What was carried over.
+   */
+  async rebuildScene(scene, options = {}) {
+    const rows = this.archive?.search?.({ scene, limit: Math.max(1, options.limit ?? 14) }) ?? [];
+    const recap = formatRecap(rows);
+    await this.map?.remove?.(scene);
+    this.injections.delete(scene);
+    if (recap !== '') this.pendingSeeds.set(scene, recap);
+    this.log(`rebuilt ${scene} (${options.reason ?? 'manual'}): kept ${recap.length} chars`);
+    return { recapChars: recap.length, messages: rows.length };
+  }
+
+  /**
+   * Rebuild every chat scene whose saved session is bigger than the budget.
+   *
+   * Called once at startup: a session that already carries hundreds of KB of
+   * history would keep costing that on every turn.
+   *
+   * @param {number} limitKb Threshold in kilobytes; 0 disables the pass.
+   * @returns {Promise<Array<{ scene: string, chars: number }>>} What was rebuilt.
+   */
+  async autoRebuildSessions(limitKb) {
+    const limit = Number(limitKb) || 0;
+    if (limit <= 0) return [];
+    const rebuilt = [];
+    const entries = Object.entries(this.map?.all?.() ?? {});
+    for (const [scene, sessionId] of entries) {
+      if (!scene.startsWith('dm:') && !scene.startsWith('group:')) continue;
+      let chars = 0;
+      try {
+        const inspection = await this.controller?.inspect?.(sessionId);
+        for (const event of inspection?.events ?? []) chars += JSON.stringify(event).length;
+      } catch (error) {
+        this.log(`inspect ${scene} failed: ${error?.message ?? error}`);
+        continue;
+      }
+      if (chars < limit * 1024) continue;
+      const result = await this.rebuildScene(scene, { reason: 'auto', limit: 14 });
+      rebuilt.push({ scene, chars, kept: result.recapChars });
+    }
+    if (rebuilt.length > 0) this.log(`auto rebuild: ${rebuilt.map(item => `${item.scene} ${Math.round(item.chars / 1024)}KB->${item.kept} chars`).join(', ')}`);
+    return rebuilt;
+  }
+
   /**
    * Injection state for one scene; a new session starts from scratch.
    *

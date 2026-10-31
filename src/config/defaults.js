@@ -69,6 +69,8 @@ export function defaults() {
       /** owner private chats are intentionally unbounded; shown locked in the UI. */
       groupHistory: 99,
       groupCharCap: 6000,
+  /** Rebuild a saved session bigger than this many KB at startup; 0 disables. */
+  autoRebuildKb: 60,
   /** Tell the model not to repeat what other group members said. */
   groupPrivacy: true,
     },
