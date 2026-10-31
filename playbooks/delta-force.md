@@ -1,12 +1,12 @@
 # 剧本：三角洲行动 · 特勤处四个工位生产（重造上一批）
 
-> 环境假设：屏幕 2560×1440、游戏全屏独占、WeGame 已登录（用户名「哞哈」）。
+> 环境假设：屏幕 2560×1440、游戏全屏独占、WeGame 已登录。
 > 坐标系：全屏绝对坐标（像素，左上角为 0,0）。若分辨率变了，全部坐标要等比缩放。
 > 首次编写：2026-11-01，依据当晚实操。
 
 ## 0. 前置
 
-1. 需要 pwsh 权限：让用户在 QQ 里发 `/yes!`（放开 5 分钟），否则每条命令都会被拦。
+1. 需要 pwsh 权限：让用户在 QQ 里发 `/yes!`（放开 15 分钟，`safety.toolGrantMinutes` 可调），否则每条命令都会被拦。
 2. 每步之后截图确认，不要盲点。截图方式：`System.Windows.Forms` 的 `VirtualScreen` + `CopyFromScreen`。
 3. 时间显示是 `时:分:秒`，`29:56:53` = 29 小时 56 分，**不是分钟**。
 
@@ -14,7 +14,7 @@
 
 | 步骤 | 动作 | 结果判据 |
 |---|---|---|
-| 1.1 | 检查 `Get-Process wegame` | 已在跑就直接用；没跑就 `Start-Process D:\GAME\wegame\wegame.exe` |
+| 1.1 | 检查 `Get-Process wegame` | 已在跑就直接用；没跑就 `Start-Process <WeGame 安装路径>\wegame.exe` |
 | 1.2 | 等窗口出现（约 8 秒） | 存在可见窗口标题 `WeGame`（可能是 pid 不同的 `browser.exe` 进程，别只看进程名） |
 | 1.3 | 点左侧「三角洲行动」，右侧点橙色「启动」 | 坐标 (1839, 1090) |
 | 1.4 | 等 15～20 秒 | `DeltaForceClient-Win64-Shipping` 进程出现，窗口标题「三角洲行动」 |
@@ -106,7 +106,7 @@ $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
 $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen($b.X,$b.Y,0,0,$bmp.Size)
-$bmp.Save("E:\DSH-to-QQ\shot.png", [System.Drawing.Imaging.ImageFormat]::Png)
+$bmp.Save("$env:TEMP\shot.png", [System.Drawing.Imaging.ImageFormat]::Png)
 $g.Dispose(); $bmp.Dispose()
 ```
 
