@@ -22,6 +22,7 @@ import { StickerStore } from './stickers/store.js';
 import { describePrompt, parseAnalysis, DESCRIBE_SYSTEM } from './stickers/describe.js';
 import { registerStickerTool } from './tools/stickers.js';
 import { registerEmojiTool } from './tools/emoji.js';
+import { registerPageTool } from './tools/page.js';
 import { Bridge } from './bridge/runtime.js';
 import { DshDriver, SessionMap } from './bridge/sessions.js';
 import { ensureSnowLuma } from './bridge/snowluma.js';
@@ -39,7 +40,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.65.0';
+const VERSION = '0.66.0';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -1091,7 +1092,9 @@ export function apply(ctx) {
   // Stickers: the model picks from the account's own 收藏表情.
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
+  ctx.effect(() => registerPageTool(ctx, { log }));
 }
+
 
 
 

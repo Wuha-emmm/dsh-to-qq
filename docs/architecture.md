@@ -18,7 +18,7 @@ dsh-to-qq（Host 插件）
    ├─ 档案     archive：SQLite、媒体、检索、保留清理
    ├─ 渲染     render：文字转图、记忆卡、日报（PowerShell + GDI+）
    ├─ 媒体     media：图片、语音、文件、合并转发、引用取图
-   ├─ 工具     tools：11 个模型工具
+   ├─ 工具     tools：12 个模型工具
    └─ 用量     llm/cost：每轮 token、峰谷价与检索计费
    ⇕ ctx.sessionController
 DSH Agent（owner 会话 / guest 会话）
@@ -48,6 +48,7 @@ Host 插件能在进程内直接调用这些方法（已实测：`list`、`model
 | 文件 | `url` / `base64` / `get_file` 三路下载到 `media/`，路径写进提示 |
 | 合并转发 | 展开两层，40 条 / 4000 字预算，内含图片继续走图片管线 |
 | 引用 | 缓冲区 → `get_msg` → 展开转发；转发的图片同样取回 |
+| 网页 | `fetch_page`：浏览器 UA + Referer、短链解析（b23.tv/t.cn/youtu.be…）、B站走公开 API；本机与内网地址一律拒绝 |
 
 ## 权限由发送者决定
 
