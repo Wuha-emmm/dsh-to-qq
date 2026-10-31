@@ -38,7 +38,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.55.0';
+const VERSION = '0.55.1';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -80,6 +80,12 @@ export function apply(ctx) {
       return route.provider === '' || route.model === '' ? undefined : route;
     },
     controller: ctx.sessionController,
+    // Rebuilding hides the replaced session instead of leaving a new sidebar row.
+    archiveSession: async sessionId => {
+      const registry = ctx.get('workspaceRegistry');
+      if (registry === undefined || typeof registry.archiveSession !== 'function') return;
+      await registry.archiveSession(sessionId);
+    },
     applyPermission: async sessionId => {
       const preset = store.get().models.permissionPreset;
       if (typeof preset !== 'string' || preset === '') return;
@@ -289,7 +295,7 @@ export function apply(ctx) {
     void bridge.autoRebuildSessions(limitKb).catch(error => log(`auto rebuild failed: ${error?.message ?? error}`));
   };
   schedule(rebuildPass, 8_000, { once: true });
-  schedule(rebuildPass, 10 * 60_000);
+  schedule(rebuildPass, 30 * 60_000);
 
   // Quota counters live in memory for speed; persist them so a restart does not
   // hand everyone a fresh daily allowance.
@@ -975,6 +981,7 @@ export function apply(ctx) {
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
 }
+
 
 
 

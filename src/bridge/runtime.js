@@ -131,7 +131,7 @@ export class Bridge {
     // Descriptions are independent: a fresh session per batch is enough, and
     // stops a 130-turn session from re-sending every earlier reply each turn.
     const stickerScene = 'sticker-describe';
-    const resetStickerSession = async () => { await this.map?.remove?.(stickerScene); };
+    const resetStickerSession = async () => { const previous = this.map?.get?.(stickerScene); await this.map?.remove?.(stickerScene); await this.#archiveReplaced(previous); };
     await resetStickerSession();
     let previewed = 0;
     let described = 0;
@@ -368,6 +368,8 @@ export class Bridge {
     this.selfId = 0;
     /** Recap text waiting for the next message of a rebuilt scene. */
     /** Scenes rebuilt (not /新建): the next message carries a recap from the archive. */
+    /** Optional hook that hides a replaced session from the sidebar. */
+    this.archiveSession = options.archiveSession;
     this.rebuildMarks = new Map();
     /** Last reply text per scene, so a bare "啥意思" can point at it. */
     this.lastReply = new Map();
@@ -732,6 +734,7 @@ export class Bridge {
       }
 
       case 'new': {
+        await this.#archiveReplaced(this.map?.get?.(scene));
         await this.map?.remove(scene);
         this.sessionChoices.delete(scene);
         await this.sendText(message, '下一条消息会开一个新会话。');
@@ -1323,10 +1326,29 @@ export class Bridge {
    * @param {{ reason?: string, limit?: number }} [options] Wiring.
    * @returns {Promise<{ recapChars: number, messages: number }>} What was carried over.
    */
+  /**
+   * Hide a session the bridge replaced, best effort.
+   *
+   * @param {string | undefined} sessionId Old binding.
+   * @returns {Promise<void>} Resolves after the attempt.
+   */
+  async #archiveReplaced(sessionId) {
+    if (typeof sessionId !== 'string' || sessionId === '') return;
+    if (this.store.get().conversation.archiveOldSessions === false) return;
+    try {
+      await this.archiveSession?.(sessionId);
+      this.log(`archived replaced session ${sessionId}`);
+    } catch (error) {
+      this.log(`archive ${sessionId} failed: ${String(error?.message ?? error).slice(0, 100)}`);
+    }
+  }
+
   async rebuildScene(scene, options = {}) {
     const rows = this.archive?.search?.({ scene, limit: Math.max(1, options.limit ?? 14) }) ?? [];
     const recap = formatRecap(rows);
+    const previous = this.map?.get?.(scene);
     await this.map?.remove?.(scene);
+    await this.#archiveReplaced(previous);
     this.injections.delete(scene);
     if (recap !== '') {
       this.rebuildMarks.set(scene, { at: Date.now() });
@@ -1353,7 +1375,7 @@ export class Bridge {
     const entries = Object.entries(this.map?.all?.() ?? {});
     for (const [scene, sessionId] of entries) {
       const lastAuto = this.autoRebuiltAt.get(scene) ?? 0;
-      if (Date.now() - lastAuto < 30 * 60_000) continue;
+      if (Date.now() - lastAuto < 6 * 3600_000) continue;
       if (!scene.startsWith('dm:') && !scene.startsWith('group:')) continue;
       let chars = 0;
       try {

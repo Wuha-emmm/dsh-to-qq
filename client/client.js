@@ -589,6 +589,7 @@ window.__ModuleLoader__.load({
         fields: [
       { path: 'conversation.cwd', label: '会话项目文件夹', type: 'text' },
       { path: 'conversation.autoRebuildKb', label: '会话重建阈值 (KB)', type: 'number' },
+      { path: 'conversation.archiveOldSessions', label: '重建时隐藏旧会话', type: 'checkbox' },
           { path: 'conversation.groupHistory', label: '群聊上文条数', type: 'number' },
           { path: 'conversation.groupCharCap', label: '注入字符上限', type: 'number' },
           { path: 'digest.enabled', label: '每天自动发群日报', type: 'checkbox' },

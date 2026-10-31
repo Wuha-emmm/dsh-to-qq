@@ -60,6 +60,7 @@
 | `cwd` | `""`（空） | — | 为 QQ 会话指定工作目录；空 = DSH 默认 |
 | `groupHistory` | `99` | `0 ~ 200` | 群聊每次注入的历史消息条数 |
 | `groupCharCap` | `6000` | `500 ~ 40000` | 注入群上下文的字数上限 |
+| `archiveOldSessions` | `true` | — |  |
 | `autoRebuildKb` | `60` | — |  |
 | `groupPrivacy` | `true` | — |  |
 
