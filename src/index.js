@@ -23,6 +23,8 @@ import { describePrompt, parseAnalysis, DESCRIBE_SYSTEM } from './stickers/descr
 import { registerStickerTool } from './tools/stickers.js';
 import { registerEmojiTool } from './tools/emoji.js';
 import { registerPageTool } from './tools/page.js';
+import { AccountStore } from './accounts/store.js';
+import { startQrLogin, pollQrLogin, verifyLogin } from './accounts/bilibili.js';
 import { Bridge } from './bridge/runtime.js';
 import { DshDriver, SessionMap } from './bridge/sessions.js';
 import { ensureSnowLuma } from './bridge/snowluma.js';
@@ -40,7 +42,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.66.0';
+const VERSION = '0.67.0';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -66,6 +68,8 @@ export function apply(ctx) {
   const store = configStore(error => log(`config: ${error.message}`));
   const stateDir = dirname(store.file);
   const map = new SessionMap(join(stateDir, 'sessions.json'));
+  const accounts = new AccountStore(join(stateDir, 'accounts.json'));
+  void accounts.load().catch(error => log(`accounts load failed: ${error.message}`));
   const guestStore = new SessionMap(join(stateDir, 'guests.json'));
   const guests = new GuestRegistry();
   const memory = new MemoryStore(join(stateDir, 'memory.json'));
@@ -767,6 +771,73 @@ export function apply(ctx) {
         return;
       }
 
+      if (url.pathname === '/dsh-to-qq/api/accounts') {
+        if (req.method === 'GET') {
+          send(200, { ok: true, accounts: accounts.status(), qrPageBase: 'https://passport.bilibili.com/qrcode/h5/login?url=' });
+          return;
+        }
+        let body = {};
+        try {
+          body = JSON.parse(await readBody(req) || '{}');
+        } catch {
+          send(400, { ok: false, error: 'invalid json' });
+          return;
+        }
+        const action = String(body.action ?? '');
+        const provider = String(body.provider ?? '');
+        try {
+          if (action === 'qr-start' && provider === 'bilibili') {
+            const qr = await startQrLogin();
+            send(200, { ok: true, key: qr.key, url: qr.url });
+            return;
+          }
+          if (action === 'qr-poll' && provider === 'bilibili') {
+            const poll = await pollQrLogin(String(body.key ?? ''));
+            if (poll.state !== 'done') {
+              send(200, { ok: true, state: poll.state, saved: false });
+              return;
+            }
+            const check = await verifyLogin(poll.cookie);
+            await accounts.set('bilibili', { cookie: poll.cookie, nickname: check.nickname, uid: check.uid, method: 'qr' });
+            send(200, { ok: true, state: 'done', saved: true, nickname: check.nickname, accounts: accounts.status() });
+            return;
+          }
+          if (action === 'save-cookie') {
+            if (provider !== 'bilibili' && provider !== 'xiaohongshu') {
+              send(400, { ok: false, error: 'unknown provider' });
+              return;
+            }
+            const cookie = String(body.cookie ?? '').trim();
+            if (cookie === '') {
+              send(400, { ok: false, error: 'cookie 为空' });
+              return;
+            }
+            const check = provider === 'bilibili' ? await verifyLogin(cookie) : { ok: true, nickname: '', uid: 0 };
+            if (provider === 'bilibili' && check.ok !== true) {
+              send(200, { ok: false, error: 'B站没认这个 cookie（可能过期或复制不全）' });
+              return;
+            }
+            await accounts.set(provider, { cookie, nickname: check.nickname, uid: check.uid, method: 'cookie' });
+            send(200, { ok: true, accounts: accounts.status(), nickname: check.nickname });
+            return;
+          }
+          if (action === 'verify') {
+            const cookie = accounts.cookieFor(provider === 'xiaohongshu' ? 'https://www.xiaohongshu.com/' : 'https://www.bilibili.com/');
+            const check = provider === 'bilibili' ? await verifyLogin(cookie) : { ok: cookie !== '', nickname: '', uid: 0 };
+            send(200, { ok: true, loggedIn: check.ok, nickname: check.nickname, accounts: accounts.status() });
+            return;
+          }
+          if (action === 'logout') {
+            await accounts.clear(provider);
+            send(200, { ok: true, accounts: accounts.status() });
+            return;
+          }
+          send(400, { ok: false, error: 'unknown action' });
+        } catch (error) {
+          send(500, { ok: false, error: String(error?.message ?? error).slice(0, 200) });
+        }
+        return;
+      }
       if (url.pathname === '/dsh-to-qq/api/usage') {
         const prices = {
           input: Number(store.get().models.inputPrice) || 0,
@@ -927,6 +998,7 @@ export function apply(ctx) {
       { kind: 'exact', path: '/dsh-to-qq/api/impressions' },
       { kind: 'exact', path: '/dsh-to-qq/api/sessions' },
       { kind: 'exact', path: '/dsh-to-qq/api/usage' },
+      { kind: 'exact', path: '/dsh-to-qq/api/accounts' },
       { kind: 'exact', path: '/dsh-to-qq/api/stickers' },
       { kind: 'exact', path: '/dsh-to-qq/api/stickers/preview' },
       { kind: 'exact', path: '/dsh-to-qq/api/stickers/update' },
@@ -1092,8 +1164,9 @@ export function apply(ctx) {
   // Stickers: the model picks from the account's own 收藏表情.
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
-  ctx.effect(() => registerPageTool(ctx, { log }));
+  ctx.effect(() => registerPageTool(ctx, { log, cookieFor: url => accounts.cookieFor(url) }));
 }
+
 
 
 

@@ -38,7 +38,10 @@ export function registerPageTool(ctx, options = {}) {
     async execute(args = {}) {
       const url = String(args.url ?? '').trim();
       if (url === '') throw new Error('url is required');
-      const page = await fetchPage(url, { maxChars: Number(args.max_chars) || 4000 });
+      const page = await fetchPage(url, {
+        maxChars: Number(args.max_chars) || 4000,
+        cookieFor: options.cookieFor,
+      });
       log(`fetched ${page.url}`);
       return { report: page.report, url: page.url, title: page.title };
     },

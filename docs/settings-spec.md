@@ -4,7 +4,7 @@
 所有字段写入 `config.json`（原子替换），Host 监听文件变化热应用；部分连接字段需要重启。
 完整字段表见 **[配置参考](configuration.md)**（由代码生成）。
 
-## 页签（8 个）
+## 页签（9 个）
 
 | 页签 | 内容 |
 |---|---|
@@ -15,6 +15,7 @@
 | 表情 | 收藏表情的识别、预览与手工修正（见 [表情包库](stickers.md)） |
 | 模型 | `models.owner` / `models.member` / `models.summarizer` 三段路由（含推理等级）、QQ 会话权限预设、峰谷单价与 Search/Fetch 单价 |
 | 档案 | `archive.*`、存储占用、立即清理、QQ 会话清理（先预览再归档） |
+| 登录 | B站扫码登录 / 粘贴 cookie，小红书粘贴 cookie；状态与退出（cookie 存状态目录，不进 config.json） |
 | 用量 | 今日 token / 缓存命中 / 费用，最近每轮明细；检索次数 |
 
 ## 交互约定

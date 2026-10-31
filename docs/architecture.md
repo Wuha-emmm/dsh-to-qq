@@ -150,3 +150,14 @@ DSH 在上下文接近窗口上限时会自动压缩（默认 `thresholdRatio 0.
 ## 用量与费用
 
 每轮 `assistant/message.usage`（输入/输出/缓存命中）与 `web_search`/`web_fetch` 次数写进 `turns` 表；「用量」页签按天汇总并按峰谷价估算（工作日 9-12、14-18 为高峰，其余半价）。实测缓存命中约 97%，长历史的主要成本是输出 token。
+
+## 站点账号（可选）
+
+「登录」页签可以给 B站 / 小红书存一份 cookie：
+
+| 站点 | 登录方式 |
+|---|---|
+| B站 | 扫码（`passport-login/web/qrcode` 生成 + 轮询）或粘贴 cookie；用 `x/web-interface/nav` 校验 |
+| 小红书 | 只支持粘贴 cookie（没有公开的扫码接口） |
+
+cookie 存在状态目录的 `accounts.json`（不写进 `config.json`，面板只回状态不回 cookie）。`fetch_page` 只对匹配域名附加 cookie（`bilibili.com/b23.tv/hdslb.com`、`xiaohongshu.com/xhslink.com/xhscdn.com`），其他站点不受影响。

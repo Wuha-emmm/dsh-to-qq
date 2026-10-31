@@ -146,13 +146,14 @@ export async function resolveShortLink(url, fetchImpl = fetch) {
  * @param {typeof fetch} [fetchImpl] Fetch implementation.
  * @returns {Promise<{ title: string, description: string, owner: string, duration: number } | undefined>} Video facts.
  */
-export async function bilibiliVideo(bvid, fetchImpl = fetch) {
+export async function bilibiliVideo(bvid, fetchImpl = fetch, cookie = '') {
   try {
     const response = await fetchImpl(`https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`, {
       headers: {
         'user-agent': USER_AGENT,
         referer: 'https://www.bilibili.com/',
         accept: 'application/json',
+        ...(cookie === '' ? {} : { cookie }),
       },
       signal: AbortSignal.timeout(8000),
     });
@@ -194,10 +195,13 @@ export async function fetchPage(rawUrl, options = {}) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const maxChars = Math.max(200, Number(options.maxChars) || 4000);
   const resolved = await resolveShortLink(checked.url, fetchImpl);
+  // A logged-in provider sends its cookie along, which is the whole point of the
+  // optional account: some pages only render for a signed-in visitor.
+  const cookie = typeof options.cookieFor === 'function' ? options.cookieFor(resolved) : '';
 
   const bvid = bvidOf(resolved);
   if (bvid !== '') {
-    const video = await bilibiliVideo(bvid, fetchImpl);
+    const video = await bilibiliVideo(bvid, fetchImpl, cookie);
     if (video !== undefined) {
       const lines = [`B站视频：${video.title}`];
       if (video.owner !== '') lines.push(`UP主：${video.owner}`);
@@ -214,6 +218,7 @@ export async function fetchPage(rawUrl, options = {}) {
       'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
       accept: 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
       referer: new URL(resolved).origin,
+      ...(cookie === '' ? {} : { cookie }),
     },
     redirect: 'follow',
     signal: AbortSignal.timeout(12_000),
