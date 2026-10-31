@@ -115,6 +115,10 @@ export class DshDriver {
     this.onToolCall = options.onToolCall ?? (() => {});
     /** @type {(() => Promise<{ provider: string, model: string } | undefined>) | undefined} */
     this.chooseModel = options.chooseModel;
+    /** @type {Map<string, string>} sessionId -> installed route signature. */
+    this.routes = new Map();
+    /** @type {Map<string, number>} tier -> last reconcile check. */
+    this.routeChecks = new Map();
     /** @type {((sessionId: string) => Promise<void>) | undefined} */
     this.applyPermission = options.applyPermission;
   }
@@ -159,9 +163,10 @@ export class DshDriver {
     // does not fail with "no API key".
     if (typeof this.chooseModel === 'function') {
       try {
-        const route = await this.chooseModel();
+        const route = await this.chooseModel(tier);
         if (route !== undefined && route.provider !== '') {
           await this.#selectModel(sessionId, route);
+          this.routes.set(sessionId, `${route.provider}|${route.model}|${route.effort ?? ''}`);
         }
       } catch (error) {
         this.log(`select model for ${sessionId} failed: ${String(error?.message ?? error).slice(0, 120)}`);
@@ -221,17 +226,37 @@ export class DshDriver {
     }
   }
 
+  /**
+   * Re-select the model when the configured route changed for this tier.
+   *
+   * @param {string} sessionId Target session.
+   * @param {string} tier Sender tier, choosing owner vs member route.
+   * @returns {Promise<void>} Resolves after the attempt.
+   */
+  async #reconcileModel(sessionId, tier) {
+    if (typeof this.chooseModel !== 'function') return;
+    const tierKey = tier === 'owner' ? 'owner' : 'member';
+    const last = this.routeChecks.get(tierKey) ?? 0;
+    if (Date.now() - last < 30_000) return;
+    this.routeChecks.set(tierKey, Date.now());
+    try {
+      const route = await this.chooseModel(tier);
+      if (route === undefined || route.provider === '') return;
+      const signature = `${route.provider}|${route.model}|${route.effort ?? ''}`;
+      if (this.routes.get(sessionId) === signature) return;
+      await this.#selectModel(sessionId, route);
+      this.routes.set(sessionId, signature);
+      this.log(`model reconciled for ${sessionId}: ${signature}`);
+    } catch (error) {
+      this.log(`reconcile model for ${sessionId} failed: ${String(error?.message ?? error).slice(0, 120)}`);
+    }
+  }
+
   async ask(request) {
     let sessionId = await this.sessionFor(request.scene, request.cwd, request.tier ?? 'owner');
-    // An already-bound scene may point at a session created before the route was
-    // pinned; re-select so a stale provider does not fail the turn.
-    if (request.model !== undefined && request.model.provider !== '') {
-      try {
-        await this.#selectModel(sessionId, request.model);
-      } catch (error) {
-        this.log(`select model for ${sessionId} failed: ${String(error?.message ?? error).slice(0, 120)}`);
-      }
-    }
+    // Reconcile the model at most every 30s per tier, so a changed settings
+    // route reaches existing sessions without a per-turn catalog fetch.
+    await this.#reconcileModel(sessionId, request.tier ?? 'owner');
     request.onSession?.(sessionId);
     // Resumed sessions also need the preset: a session created elsewhere keeps
     // the deployment default until something writes its permission events.

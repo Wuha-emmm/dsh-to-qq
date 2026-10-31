@@ -39,7 +39,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.59.0';
+const VERSION = '0.59.1';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -75,9 +75,10 @@ export function apply(ctx) {
   /** Event types seen during turns, so unknown shapes can be identified. */
   const eventTypes = new Set();
   const driver = new DshDriver({
-    chooseModel: async () => {
+    chooseModel: async tier => {
       const catalog = await ctx.sessionController.modelCatalog();
-      const route = pickRoute(catalog, store.get().models.owner);
+      const settings = tier === 'owner' ? store.get().models.owner : store.get().models.member;
+      const route = pickRoute(catalog, settings);
       return route.provider === '' || route.model === '' ? undefined : route;
     },
     controller: ctx.sessionController,
@@ -89,6 +90,7 @@ export function apply(ctx) {
     },
     applyPermission: async sessionId => {
       const preset = store.get().models.permissionPreset;
+      if (appliedPermissions.get(sessionId) === preset) return;
       if (typeof preset !== 'string' || preset === '') return;
       const presets = ctx.get('permissionPresets');
       if (presets === undefined || typeof presets.set !== 'function') return;
@@ -98,6 +100,7 @@ export function apply(ctx) {
       if (agent === undefined) return;
       if (presets.current?.(agent.session) === preset) return;
       presets.set(agent.session, preset);
+      appliedPermissions.set(sessionId, preset);
       log(`permission preset ${preset} applied to ${sessionId}`);
     },
     map,
@@ -1079,6 +1082,7 @@ export function apply(ctx) {
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
 }
+
 
 
 

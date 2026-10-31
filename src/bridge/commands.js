@@ -83,14 +83,16 @@ export function formatSessionList(items, limit = 10) {
 export function cleanupCandidates(items, options) {
   const bound = options.bound ?? new Set();
   const keepMs = Math.max(0, Number(options.keepMs) || 0);
-  const wanted = String(options.cwd ?? '').toLowerCase();
+  // Windows separators and drive-letter case must not hide a match.
+  const normalizePath = value => String(value ?? '').replace(/\\/g, '/').replace(/\/$/, '').toLowerCase();
+  const wanted = normalizePath(options.cwd ?? '');
   const now = Number(options.now) || Date.now();
   return (Array.isArray(items) ? items : [])
     .filter(item => item !== null && typeof item === 'object' && typeof item.id === 'string')
     .filter(item => bound.has(item.id) === false)
     .filter(item => item.archived !== true && item.running !== true)
     .filter(item => now - (Number(item.updatedAt) || 0) >= keepMs)
-    .filter(item => wanted === '' || String(item.cwd ?? '').toLowerCase() === wanted)
+    .filter(item => wanted === '' || normalizePath(item.cwd ?? '') === wanted)
     .sort((a, b) => (Number(a.updatedAt) || 0) - (Number(b.updatedAt) || 0));
 }
 
