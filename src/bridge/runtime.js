@@ -1292,7 +1292,7 @@ export class Bridge {
         : Number(config.output.replyCharsGroup) || 0;
       const lengthLimit = tierLimit > 0 ? tierLimit : baseLimit;
       const lengthNote = lengthLimit > 0
-        ? injection.fixed('length', `【回复长度】尽量控制在 ${lengthLimit} 字以内；内容较长时正常输出，我会自动转成图片发出去。【B站视频】要说明某个 B站视频讲了什么时，先调 bilibili 工具的 subtitle 动作读字幕（登录态已就绪）；拿不到字幕再用 web_fetch，别先下结论说看不到。`)
+        ? injection.fixed('length', `【回复长度】尽量控制在 ${lengthLimit} 字以内；内容较长时正常输出，我会自动转成图片发出去。【B站视频】要说明某个 B站视频讲了什么时，先调 bilibili 工具的 subtitle 动作读字幕（登录态已就绪）；拿不到字幕再用 web_fetch，别先下结论说看不到。【日报】要出日报就直接调 group_digest（day 传 today / yesterday / 前天 / YYYY-MM-DD），它两秒出图；不要用 qq_history 自己翻记录统计，那样要好几分钟。`)
         : '';
       const bodyText = `${promptBase}${imageNote}${voiceNote}${fileNote}${forwardNote}${stickerNote}${lengthNote}${nudge}`;
       const text = seed === undefined ? bodyText : `${seed}\n\n${bodyText}`;
