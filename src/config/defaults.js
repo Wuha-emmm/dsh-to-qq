@@ -96,6 +96,10 @@ export function defaults() {
   groupPrivacy: true,
     },
     memory: {
+      /** Drop credentials, remote-control and capture facts from memory notes. */
+      redactSensitive: true,
+      /** Extra words that make a note too sensitive to keep. */
+      sensitiveWords: [],
       summaryLimit: 1000,
       personaLimit: 1000,
       autoNoteEvery: 8,

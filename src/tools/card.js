@@ -52,7 +52,9 @@ export function registerMemoryCardTool(ctx, options) {
         qq: target,
         name,
         persona: card.persona?.text ?? '',
-        notes: card.notes ?? [],
+        // The image path is the last line of defence: a note that slipped into
+      // storage still must not be drawn.
+      notes: filterNotes(card.notes ?? []).notes,
         admin: options.store.get().access.admins.some(admin => admin.qq === target),
         sceneLabel: await sceneLabelFor(bridge.client, info.scene),
       }, { log: options.log, backdropDir: bridge.mediaDir });

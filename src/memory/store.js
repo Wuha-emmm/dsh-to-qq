@@ -28,12 +28,16 @@ const MAX_NOTE_CHARS = 240;
  */
 
 /** Durable store for every card, kept beside the other plugin state. */
+import { filterNotes, sanitizeNote, compileWords } from './sensitive.js';
+
 export class MemoryStore {
   /**
    * @param {string} file Absolute path to memory.json.
    */
   constructor(file) {
     this.file = file;
+    /** Privacy policy: enabled flag plus owner-supplied extra words. */
+    this.privacy = { enabled: true, words: [] };
     /** @type {Map<string, MemoryCard>} */
     this.cards = new Map();
     /** Run statistics, kept so a restart does not reset the panel. */
@@ -52,13 +56,55 @@ export class MemoryStore {
             this.meta = { impressions: { ...(card?.impressions ?? {}) } };
             continue;
           }
-          this.cards.set(qq, normalizeCard(card));
+          this.cards.set(qq, this.#sanitizeCard(normalizeCard(card)));
         }
+        if (this.cleaned === true) await this.save();
       }
     } catch {
       // A missing or unreadable file simply starts empty.
     }
     this.loaded = true;
+  }
+
+  /**
+   * Apply the privacy policy to one card's notes.
+   *
+   * @param {MemoryCard} card Card to clean in place.
+   * @returns {MemoryCard} The same card.
+   */
+  #sanitizeCard(card) {
+    if (this.privacy.enabled !== true) return card;
+    const filtered = this.#filterNotes(card.notes);
+    if (filtered.notes.length !== card.notes.length) this.cleaned = true;
+    card.notes = filtered.notes;
+    return card;
+  }
+
+  /**
+   * Drop or soften notes according to the policy.
+   *
+   * @param {Array<{ at: number, text: string }>} notes Raw notes.
+   * @returns {{ notes: Array<{ at: number, text: string }> }} Filtered notes.
+   */
+  #filterNotes(notes) {
+    if (this.privacy.enabled !== true) return { notes };
+    const extra = compileWords(this.privacy.words);
+    const result = filterNotes(notes, extra);
+    if (result.dropped > 0) this.dropped = (this.dropped ?? 0) + result.dropped;
+    return { notes: result.notes };
+  }
+
+  /**
+   * Install the privacy policy from configuration.
+   *
+   * @param {{ enabled?: boolean, words?: string[] }} [policy] Policy patch.
+   * @returns {void}
+   */
+  setPrivacy(policy = {}) {
+    this.privacy = {
+      enabled: policy.enabled !== false,
+      words: Array.isArray(policy.words) ? policy.words : [],
+    };
   }
 
   /**
@@ -86,7 +132,8 @@ export class MemoryStore {
    */
   async setNotes(qq, notes) {
     const card = this.get(qq);
-    card.notes = Array.isArray(notes) ? notes : [];
+    const filtered = this.#filterNotes(Array.isArray(notes) ? notes : []);
+    card.notes = filtered.notes;
     await this.save();
   }
 
@@ -133,9 +180,17 @@ export class MemoryStore {
    */
   async addNote(qq, text, limit = DEFAULT_NOTE_LIMIT) {
     const card = this.get(qq);
-    const trimmed = String(text ?? '').trim().slice(0, MAX_NOTE_CHARS);
-    if (trimmed === '') return card;
-    card.notes.push({ at: Date.now(), text: trimmed });
+    const raw = String(text ?? '').trim().slice(0, MAX_NOTE_CHARS);
+    if (raw === '') return card;
+    // Credentials, remote-control habits and captures never enter a card.
+    const safe = this.privacy.enabled === true
+      ? sanitizeNote(raw, compileWords(this.privacy.words))
+      : { dropped: false, text: raw };
+    if (safe.dropped) {
+      this.dropped = (this.dropped ?? 0) + 1;
+      return card;
+    }
+    card.notes.push({ at: Date.now(), text: safe.text });
     let total = card.notes.reduce((sum, note) => sum + note.text.length, 0);
     while (total > limit && card.notes.length > 1) {
       const removed = card.notes.shift();
@@ -278,8 +333,9 @@ export function renderCard(request) {
   const lines = [`【记忆卡 · ${name}(${qq})】`];
   if (card.persona !== null) lines.push(`人设（对方对我的要求，照着做）：${card.persona.text}`);
   if (hasNotes) {
+    const safe = filterNotes(card.notes);
     lines.push('我对这个人的印象（从聊天里记下的）：');
-    for (const note of card.notes) lines.push(`- ${note.text}`);
+    for (const note of safe.notes) lines.push(`- ${note.text}`);
   }
   lines.push('（人设 = 对方要求你怎么说话，用 memory_persona_set 改；笔记 = 你观察到的事实，用 memory_note 记。别把说话规则写进笔记。）');
   return lines.join('\n');
