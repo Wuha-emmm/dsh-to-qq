@@ -12,17 +12,17 @@
 |---|---|---|---|
 | `owner` | `sender_id ∈ admins` 且私聊 | `dm:<qq>` | 不限制 |
 | `owner-group` | 管理员在群里（且通过准入） | `group:<gid>` | 联网 + 发消息 + 记忆 + 日报 + 状态（**无文件、无 shell**） |
-| `member` | 非管理员私聊 | `dm:<qq>` | 联网 + 发消息 + 记忆卡 |
+| `member` | 非管理员私聊，且是**机器人好友** | `dm:<qq>` | 联网 + 发消息 + 记忆卡 + 表情 |
 | `member-group` | 非管理员在群里 | `group:<gid>` | 联网 + 发消息 + 记忆卡 + 日报 |
 
-「陌生人」不是档位，而是**准入结果**：非管理员私聊时按 `access.strangerPolicy` 决定忽略 / 回一句 / 拉黑。
+「陌生人」不是档位，而是**准入结果**：非管理员私聊时先查机器人好友列表，是好友就按 `member` 放行；不是好友才按 `access.strangerPolicy` 决定忽略 / 回一句 / 拉黑。好友列表来自 `get_friend_list`，每 30 分钟最多刷新一次，`access.friendsAsMember` 可关掉这条豁免。
 
 ## 准入（admit）
 
 一条消息进入模型前要过四关：
 
 1. 命中 `access.blockedWords` → 丢弃
-2. 私聊且非管理员 → 按 `strangerPolicy` 处理
+2. 私聊且非管理员 → 是好友则放行（`member`），否则按 `strangerPolicy` 处理
 3. 群聊且不满足 `groupMode`（白名单/黑名单/全部）→ 丢弃
 4. 群聊且 `mentionOnly` 为真但没有 @ 机器人 → 丢弃
 
@@ -37,19 +37,27 @@
 | `qq_history` | ✅ | ✅ | ❌ | ❌ |
 | `memory_card_get` / `memory_note` / `memory_persona_set` / `memory_card_clear` / `memory_card_send` | ✅ | ✅ | ✅ | ✅ |
 | `group_digest` | ✅ | ✅ | ❌ | ✅ |
+| `sticker_send` / `emoji_send` | ✅ | ✅ | ✅ | ✅ |
 | `qq_status` | ✅ | ✅ | ❌ | ❌ |
 
 记忆类工具**永远只作用于调用者自己**：QQ 号从会话解析，不接受参数，群里也没法改别人的卡。
 
 ## 审批
 
-管理员私聊里执行 `write` / `edit` / `pwsh` / `plugin_manager` 前，桥会挂起并在 QQ 里要求 `/yes` 确认（默认 60 秒有效）。群档位没有这些工具，所以不存在"群里骗审批"的路径。
+管理员私聊里执行 `write` / `edit` / `pwsh` / `plugin_manager` 前，桥会挂起并在 QQ 里要求确认：
+
+| 回复 | 效果 |
+|---|---|
+| `/yes` 或口语「好 / 确认 / OK」 | 只批准**当前这一次**调用（工具名 + 参数签名），3 分钟内有效 |
+| `/yes!` | 放行**整个工具** 5 分钟，期间任意参数都不用再问 |
+
+批准后桥会自动让模型继续执行刚才被拦下的操作，不需要你再补一句话。群档位没有这些工具，所以不存在"群里骗审批"的路径。
 
 ## 配额
 
-- 每人每天 `limits.memberDaily` 次（0 = 不限）
-- 每群每天 `limits.groupDaily` 次
-- 每人每分钟 `limits.userPerMinute` 次
+- 每人每天 `limits.memberDaily` 次（默认 100，0 = 不限）
+- 每群每天 `limits.groupDaily` 次（默认 400）
+- 每人每分钟 `limits.userPerMinute` 次（默认 8）
 - 管理员不受配额限制
 
 计数是内存态的，重启清零；按北京时间自然日滚动。
@@ -97,3 +105,23 @@
 `access.blockedWords` 会扫描**合并后的全部文本**：正文、引用、转发内容、语音转写、文件名。命中即静默丢弃（计数里记 `ignored`）。
 
 图片内容本身无法做关键词匹配，需要的话只能靠群档不提供文件/命令权限来兜底。
+
+## 好友与入群申请
+
+OneBot 的 `request` 事件（加好友 / 入群 / 邀请进群）不由桥自己决定，而是编号后私聊发给所有管理员：
+
+```
+【入群申请 #2】小红(123456)
+群：987654321
+附言：想进群
+回复 /同意 2 或 /拒绝 2（30 分钟内有效）
+```
+
+- `/同意 N`、`/拒绝 N`，或只有一条待办时直接回「同意」/「拒绝」
+- 超过 `access.requestTtlMin`（默认 30 分钟）未处理则失效
+- `access.forwardRequests` 关掉后不转发（只在日志里留一行）
+- **被 QQ 风控拦下的申请不会推给 OneBot**，桥收不到也就无从通知，只能在客户端「过滤信息」里手动处理
+
+## 记忆卡的隐私过滤
+
+印象里不该出现"远程控制电脑""登录账号""密码""截图""手机号"这类事实：这类条目在**写入、印象总结、卡片加载、提示词渲染、出图**五处都会被丢弃；本地绝对路径软化成「本地路径」。开关是 `memory.redactSensitive`，`memory.sensitiveWords` 可加自定义词。记忆卡是会被发到群里的，所以这张网必须一直在。

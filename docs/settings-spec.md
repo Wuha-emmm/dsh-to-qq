@@ -4,17 +4,18 @@
 所有字段写入 `config.json`（原子替换），Host 监听文件变化热应用；部分连接字段需要重启。
 完整字段表见 **[配置参考](configuration.md)**（由代码生成）。
 
-## 页签（7 个）
+## 页签（8 个）
 
 | 页签 | 内容 |
 |---|---|
 | 连接 | `connection.*`，加 SnowLuma 控制台入口与 `ui.pet*` |
-| 权限 | `access.*`（管理员、群策略、陌生人策略、敏感词）与 `limits.*`（配额、并发、超时、延迟） |
-| 对话 | `conversation.*`（项目文件夹、上下文）、`digest.*`（群日报）、`output.*`（转图） |
-| 记忆 | `memory.*`（人设/印象上限、自动整理）＋ 补印象按钮与进度 |
+| 权限 | `access.*`（管理员、群策略、陌生人/好友策略、申请转交、敏感词）与 `limits.*`（配额、并发、超时、延迟） |
+| 对话 | `conversation.*`（项目文件夹、上下文、重建阈值、旧会话归档）、`digest.*`（群日报）、`output.*`（分场景回复上限、转图） |
+| 记忆 | `memory.*`（人设/印象上限、自动整理、敏感信息过滤）＋ 补印象按钮与进度 |
 | 表情 | 收藏表情的识别、预览与手工修正（见 [表情包库](stickers.md)） |
-| 模型 | `models.owner` / `models.member` / `models.summarizer` 三段路由 |
-| 档案 | `archive.*`、存储占用、立即清理 |
+| 模型 | `models.owner` / `models.member` / `models.summarizer` 三段路由（含推理等级）、QQ 会话权限预设、峰谷单价与 Search/Fetch 单价 |
+| 档案 | `archive.*`、存储占用、立即清理、QQ 会话清理（先预览再归档） |
+| 用量 | 今日 token / 缓存命中 / 费用，最近每轮明细；检索次数 |
 
 ## 交互约定
 

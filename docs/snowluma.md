@@ -46,3 +46,7 @@ networks.wsServers[0].accessToken     → 连接事件流时用
 | `retcode 100` | 调用失败，看 `wording` |
 | `retcode 0` | 成功，`data.message_id` 是消息 id |
 | `ptt translate failed: error=9` | 语音转写还没就绪，重试一次通常就好 |
+
+## 完整 API 参考
+
+本机已存一份离线版：[`snowluma-api.md`](snowluma-api.md)（12 个分类、219 个 OneBot 动作索引，导出时间 2026-10-30）。线上原文：<https://snowluma.github.io/zh/docs/api>。
