@@ -43,7 +43,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.70.0';
+const VERSION = '0.70.1';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -812,11 +812,27 @@ export function apply(ctx) {
           if (action === 'browser-read') {
             const config = store.get();
             const port = Number(config.accounts?.debugPort) || 9333;
+            // The person may have signed in and then closed the window. The
+            // profile keeps the login, so reopening it and retrying is enough.
             let cookies;
-            try {
-              cookies = await readBrowserCookies(port);
-            } catch (error) {
-              send(200, { ok: false, error: `读不到浏览器 cookie：${String(error?.message ?? error).slice(0, 120)}` });
+            let lastError = '';
+            for (let attempt = 0; attempt < 4; attempt += 1) {
+              try {
+                cookies = await readBrowserCookies(port);
+                break;
+              } catch (error) {
+                lastError = String(error?.message ?? error).slice(0, 120);
+                if (attempt === 0) {
+                  const browser = findBrowser(config.accounts?.browserPath ?? '');
+                  if (browser === '') break;
+                  const url = provider === 'bilibili' ? 'https://www.bilibili.com/' : 'https://www.xiaohongshu.com/';
+                  await launchBrowser({ browser, profileDir: browserProfile, url, port });
+                }
+                await new Promise(resolve => setTimeout(resolve, 1500));
+              }
+            }
+            if (cookies === undefined) {
+              send(200, { ok: false, error: `读不到浏览器 cookie（${lastError}）。点「打开登录窗口」，登录后保持窗口开着再读取` });
               return;
             }
             const header = cookieHeaderFrom(cookies, provider);
@@ -1197,6 +1213,7 @@ export function apply(ctx) {
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
   ctx.effect(() => registerPageTool(ctx, { log, cookieFor: url => accounts.cookieFor(url) }));
 }
+
 
 
 

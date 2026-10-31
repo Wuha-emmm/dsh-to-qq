@@ -883,7 +883,7 @@ window.__ModuleLoader__.load({
         try {
           const result = await postJson('/dsh-to-qq/api/accounts', { action: 'browser-open', provider });
           if (result.ok !== true) { setNotice(result.error ?? '打开失败'); return; }
-          setNotice(`${result.hint}（窗口用的是独立配置，不影响你平时用的浏览器）`);
+          setNotice(`${result.hint}。窗口关了也没关系：点「读取登录状态」会自动再打开`);
         } catch (reason) {
           setNotice(`打开失败：${reason?.message ?? reason}`);
         } finally {

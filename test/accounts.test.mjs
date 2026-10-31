@@ -33,7 +33,16 @@ test('the jar persists and can be cleared', async () => {
     const first = new AccountStore(file);
     await first.load();
     await first.set('xiaohongshu', { cookie: 'web_session=xyz' });
-    const saved = JSON.parse(await readFile(file, 'utf8'));
+    // Windows occasionally reports the rename before the bytes are visible.
+    let saved = {};
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        saved = JSON.parse(await readFile(file, 'utf8'));
+        break;
+      } catch {
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+    }
     assert.equal(saved.xiaohongshu.cookie, 'web_session=xyz');
 
     const second = new AccountStore(file);
