@@ -121,9 +121,12 @@ export async function summarizeImpressions(bridge) {
       bridge.impressionStats.scanned += 1;
       const card = bridge.memory.get(senderId);
       const cursor = Number(card.impressionCursor ?? 0);
-      const rows = bridge.archive.senderMessages(senderId, cursor, every * 4);
+      // Read the OLDEST batch after the cursor, so no message is ever skipped.
+      // Reading `every * 4` and keeping the tail silently dropped the first
+      // three batches and then advanced the cursor past them.
+      const rows = bridge.archive.senderMessages(senderId, cursor, every);
       if (rows.length < every) continue;
-      const batch = rows.slice(-every);
+      const batch = rows;
       if (enoughSignal(batch, config.memory.impressionMinChars) !== true) continue;
       const ok = await writeImpressions(bridge, senderId, card, batch, config);
       if (ok) updated += 1;
