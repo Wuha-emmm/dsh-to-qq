@@ -1040,7 +1040,8 @@ export class Bridge {
           return;
         }
         this.approvals.grantTool(message.scene, tool, 5 * 60_000);
-        await this.sendText(message, `已放行 ${tool} 5 分钟（这段时间内同类调用不用再确认）。`);
+        await this.sendText(message, `已放行 ${tool} 5 分钟，正在继续刚才的操作…`);
+        await this.#resumeAfterApproval(message, '该工具已放行 5 分钟');
         return;
       }
       if (explicit || (casual && pending !== undefined)) {
@@ -1051,9 +1052,10 @@ export class Bridge {
         await this.sendText(
           message,
           approved === undefined
-            ? '现在没有待确认的操作（或已超过 5 分钟，需要让它重新试一次）。'
-            : `已确认 ${label}（3 分钟内有效，只批这一条）。想放开整个工具，发 /yes!`,
+            ? '现在没有待确认的操作（或已超过 3 分钟，需要让它重新试一次）。'
+            : `已确认 ${label}（3 分钟内有效，只批这一条），正在继续…`,
         );
+        if (approved !== undefined) await this.#resumeAfterApproval(message, `${approved.tool} 这一次调用已批准`);
         return;
       }
     }
@@ -1394,6 +1396,43 @@ export class Bridge {
    * @param {string | undefined} sessionId Old binding.
    * @returns {Promise<void>} Resolves after the attempt.
    */
+  /**
+   * Nudge the model to continue after an approval.
+   *
+   * Approving a call only answers the bridge's guard: the model's turn that was
+   * blocked had already ended, so without this the conversation sits silent
+   * until the person types something else.
+   *
+   * @param {import('./events.js').QQMessage} message Triggering message.
+   * @param {string} note What was approved.
+   * @returns {Promise<void>} Resolves after the resumed turn.
+   */
+  async #resumeAfterApproval(message, note) {
+    const config = this.store.get();
+    const promptText = `【权限提示】${note}。请继续刚才被拦下的操作；如果已经不需要了，用一句话说明原因。`;
+    try {
+      await this.setTyping?.(message, true);
+      const result = await this.driver?.ask?.({
+        scene: message.scene,
+        text: promptText,
+        content: [{ type: 'text', text: promptText }],
+        cwd: config.conversation.cwd,
+        timeoutMs: config.limits.turnTimeoutMs,
+        tier: 'owner',
+      });
+      const body = String(result?.text ?? '').trim();
+      if (body !== '') {
+        for (const chunk of chunkText(body, CHUNK_LIMIT)) await this.sendText(message, chunk, { record: false });
+        this.recordOutbound?.(message, body);
+      }
+      this.lastReply.set(message.scene, body);
+    } catch (error) {
+      await this.sendText(message, `继续执行失败：${String(error?.message ?? error).slice(0, 160)}`);
+    } finally {
+      await this.setTyping?.(message, false);
+    }
+  }
+
   async #archiveReplaced(sessionId) {
     if (typeof sessionId !== 'string' || sessionId === '') return;
     if (this.store.get().conversation.archiveOldSessions === false) return;
