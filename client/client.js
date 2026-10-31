@@ -738,7 +738,7 @@ window.__ModuleLoader__.load({
       'access.mentionOnly': '群里只有 @ 机器人才回应',
       'access.strangerPolicy': '陌生人私聊策略：忽略 / 仅问答',
       'conversation.cwd': 'QQ 会话归到这个文件夹（DSH 侧边栏按它分组）；留空用 DSH 默认',
-      'conversation.autoRebuildKb': '会话历史超过这个大小才重建（默认 200 KB，只带走最近几条消息）；调大更保守，0 = 关闭',
+      'conversation.autoRebuildKb': '会话超过这个大小才自动重建（默认 0 = 不自动重建，改用 /重建）；缓存命中价只有 1/50，重建反而会打断缓存',
       'conversation.groupHistory': '每次回答带上的群消息条数',
       'conversation.groupCharCap': '注入上下文的字数上限',
       'digest.enabled': '每天固定时间把群日报图发到群',

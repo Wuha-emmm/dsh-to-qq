@@ -85,8 +85,8 @@ export function defaults() {
   cleanupKeepHours: 24,
   /** Archive the session a rebuild replaces, so the sidebar does not grow forever. */
   archiveOldSessions: true,
-  /** Rebuild a saved session bigger than this many KB at startup; 0 disables. */
-  autoRebuildKb: 200,
+  /** Rebuild a saved session bigger than this many KB automatically; 0 = off (use /重建). */
+  autoRebuildKb: 0,
   /** Tell the model not to repeat what other group members said. */
   groupPrivacy: true,
     },
