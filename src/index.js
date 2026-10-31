@@ -24,7 +24,8 @@ import { registerStickerTool } from './tools/stickers.js';
 import { registerEmojiTool } from './tools/emoji.js';
 import { registerPageTool } from './tools/page.js';
 import { AccountStore } from './accounts/store.js';
-import { startQrLogin, pollQrLogin, verifyLogin } from './accounts/bilibili.js';
+import { verifyLogin } from './accounts/bilibili.js';
+import { findBrowser, launchBrowser, readBrowserCookies, cookieHeaderFrom, hasBilibiliSession } from './accounts/browser.js';
 import { Bridge } from './bridge/runtime.js';
 import { DshDriver, SessionMap } from './bridge/sessions.js';
 import { ensureSnowLuma } from './bridge/snowluma.js';
@@ -42,7 +43,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.68.0';
+const VERSION = '0.69.0';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -69,6 +70,7 @@ export function apply(ctx) {
   const stateDir = dirname(store.file);
   const map = new SessionMap(join(stateDir, 'sessions.json'));
   const accounts = new AccountStore(join(stateDir, 'accounts.json'));
+  const browserProfile = join(stateDir, 'browser-profile');
   void accounts.load().catch(error => log(`accounts load failed: ${error.message}`));
   const guestStore = new SessionMap(join(stateDir, 'guests.json'));
   const guests = new GuestRegistry();
@@ -773,7 +775,12 @@ export function apply(ctx) {
 
       if (url.pathname === '/dsh-to-qq/api/accounts') {
         if (req.method === 'GET') {
-          send(200, { ok: true, accounts: accounts.status(), qrPageBase: 'https://passport.bilibili.com/qrcode/h5/login?url=' });
+          send(200, {
+            ok: true,
+            accounts: accounts.status(),
+            browser: findBrowser(store.get().accounts?.browserPath ?? ''),
+            debugPort: Number(store.get().accounts?.debugPort) || 9333,
+          });
           return;
         }
         let body = {};
@@ -786,20 +793,44 @@ export function apply(ctx) {
         const action = String(body.action ?? '');
         const provider = String(body.provider ?? '');
         try {
-          if (action === 'qr-start' && provider === 'bilibili') {
-            const qr = await startQrLogin();
-            send(200, { ok: true, key: qr.key, url: qr.url });
-            return;
-          }
-          if (action === 'qr-poll' && provider === 'bilibili') {
-            const poll = await pollQrLogin(String(body.key ?? ''));
-            if (poll.state !== 'done') {
-              send(200, { ok: true, state: poll.state, saved: false });
+          if (action === 'browser-open') {
+            if (provider !== 'bilibili' && provider !== 'xiaohongshu') {
+              send(400, { ok: false, error: 'unknown provider' });
               return;
             }
-            const check = await verifyLogin(poll.cookie);
-            await accounts.set('bilibili', { cookie: poll.cookie, nickname: check.nickname, uid: check.uid, method: 'qr' });
-            send(200, { ok: true, state: 'done', saved: true, nickname: check.nickname, accounts: accounts.status() });
+            const config = store.get();
+            const browser = findBrowser(config.accounts?.browserPath ?? '');
+            if (browser === '') {
+              send(200, { ok: false, error: '没找到 Edge/Chrome，请在设置里填写浏览器路径' });
+              return;
+            }
+            const url = provider === 'bilibili' ? 'https://www.bilibili.com/' : 'https://www.xiaohongshu.com/';
+            await launchBrowser({ browser, profileDir: browserProfile, url, port: Number(config.accounts?.debugPort) || 9333 });
+            send(200, { ok: true, browser, url, hint: '在打开的窗口里登录，登录完成后回来点「读取登录状态」' });
+            return;
+          }
+          if (action === 'browser-read') {
+            const config = store.get();
+            const port = Number(config.accounts?.debugPort) || 9333;
+            let cookies;
+            try {
+              cookies = await readBrowserCookies(port);
+            } catch (error) {
+              send(200, { ok: false, error: `读不到浏览器 cookie：${String(error?.message ?? error).slice(0, 120)}` });
+              return;
+            }
+            const header = cookieHeaderFrom(cookies, provider);
+            if (header === '') {
+              send(200, { ok: false, error: provider === 'bilibili' ? '浏览器里还没有 B站 登录态' : '浏览器里还没有小红书登录态' });
+              return;
+            }
+            const check = provider === 'bilibili' ? await verifyLogin(header) : { ok: true, nickname: '', uid: 0 };
+            if (provider === 'bilibili' && (check.ok !== true || hasBilibiliSession(header) !== true)) {
+              send(200, { ok: false, error: 'B站 没认这份登录态（可能还没登录完成）' });
+              return;
+            }
+            await accounts.set(provider, { cookie: header, nickname: check.nickname, uid: check.uid, method: 'browser' });
+            send(200, { ok: true, accounts: accounts.status(), nickname: check.nickname });
             return;
           }
           if (action === 'save-cookie') {
@@ -1166,6 +1197,7 @@ export function apply(ctx) {
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
   ctx.effect(() => registerPageTool(ctx, { log, cookieFor: url => accounts.cookieFor(url) }));
 }
+
 
 
 

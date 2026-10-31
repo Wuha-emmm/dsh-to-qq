@@ -542,6 +542,8 @@ window.__ModuleLoader__.load({
           { path: 'connection.wsUrl', label: 'OneBot WS', type: 'text', placeholder: 'ws://127.0.0.1:3001' },
           { path: 'connection.eventPath', label: '事件路径', type: 'text', placeholder: '/' },
           { path: 'connection.snowlumaDir', label: 'SnowLuma 目录', type: 'text', placeholder: 'D:\\SnowLuma' },
+          { path: 'accounts.browserPath', label: '登录浏览器路径', type: 'text', placeholder: '留空自动找 Edge / Chrome' },
+          { path: 'accounts.debugPort', label: '登录浏览器调试端口', type: 'number' },
           { path: 'connection.botUin', label: '机器人 QQ 号（0 = 自动识别）', type: 'number' },
           { path: 'connection.tokenEnv', label: 'token 环境变量名', type: 'text', placeholder: 'QQ_BOT_TOKEN' },
           { path: 'connection.autoStart', label: '自动启动 SnowLuma', type: 'checkbox' },
@@ -848,44 +850,39 @@ window.__ModuleLoader__.load({
             h(Select, { value: route?.effort ?? '', options: effortOptions, onChange: next => onChange({ ...route, effort: next }) }))));
     };
 
-    /** Optional site accounts: B站 QR sign-in and cookie paste for both sites. */
+    /** Optional site accounts: a separate browser window for manual sign-in. */
     const AccountsBox = () => {
       const [state, setState] = React.useState(null);
       const [notice, setNotice] = React.useState('');
-      const [qr, setQr] = React.useState(null);
-      const [cookieInput, setCookieInput] = React.useState({ bilibili: '', xiaohongshu: '' });
       const [busy, setBusy] = React.useState('');
+      const [cookieInput, setCookieInput] = React.useState({ bilibili: '', xiaohongshu: '' });
       const load = () => getJson('/dsh-to-qq/api/accounts')
         .then(setState)
         .catch(reason => setNotice(`读取失败：${reason?.message ?? reason}`));
       React.useEffect(() => { void load(); }, []);
-      // Poll while a QR sign-in is in flight; stop as soon as it resolves.
-      React.useEffect(() => {
-        if (qr === null || qr.state === 'done' || qr.state === 'expired') return undefined;
-        const timer = setInterval(async () => {
-          try {
-            const result = await postJson('/dsh-to-qq/api/accounts', { action: 'qr-poll', provider: 'bilibili', key: qr.key });
-            setQr(current => ({ ...current, state: result.state ?? 'waiting' }));
-            if (result.saved === true) {
-              setNotice(`B站已登录${result.nickname === '' ? '' : `：${result.nickname}`}`);
-              setQr(null);
-              await load();
-            }
-          } catch (reason) {
-            setNotice(`轮询失败：${reason?.message ?? reason}`);
-          }
-        }, 2000);
-        return () => clearInterval(timer);
-      }, [qr?.key, qr?.state]);
-      const startQr = async () => {
-        setBusy('qr');
-        setNotice('正在向 B站 申请二维码…');
+      const openBrowser = async provider => {
+        setBusy(provider);
+        setNotice('正在打开登录窗口…');
         try {
-          const result = await postJson('/dsh-to-qq/api/accounts', { action: 'qr-start', provider: 'bilibili' });
-          setQr({ key: result.key, url: result.url, state: 'waiting' });
-          setNotice('点上面的「打开扫码页」用手机扫码，成功后会自动保存');
+          const result = await postJson('/dsh-to-qq/api/accounts', { action: 'browser-open', provider });
+          if (result.ok !== true) { setNotice(result.error ?? '打开失败'); return; }
+          setNotice(`${result.hint}（窗口用的是独立配置，不影响你平时用的浏览器）`);
         } catch (reason) {
-          setNotice(`申请二维码失败：${reason?.message ?? reason}`);
+          setNotice(`打开失败：${reason?.message ?? reason}`);
+        } finally {
+          setBusy('');
+        }
+      };
+      const readLogin = async provider => {
+        setBusy(provider);
+        setNotice('正在读取登录状态…');
+        try {
+          const result = await postJson('/dsh-to-qq/api/accounts', { action: 'browser-read', provider });
+          if (result.ok !== true) { setNotice(result.error ?? '读取失败'); return; }
+          setNotice(`${provider === 'bilibili' ? 'B站' : '小红书'}已登录${result.nickname ? `：${result.nickname}` : ''}`);
+          await load();
+        } catch (reason) {
+          setNotice(`读取失败：${reason?.message ?? reason}`);
         } finally {
           setBusy('');
         }
@@ -923,7 +920,7 @@ window.__ModuleLoader__.load({
         if (entry === undefined) return '读取中…';
         if (entry.loggedIn !== true) return '未登录';
         const who = entry.nickname === '' ? (entry.uid > 0 ? `UID ${entry.uid}` : '已保存 cookie') : entry.nickname;
-        return `已登录：${who}（${entry.method === 'qr' ? '扫码' : 'cookie'}）`;
+        return `已登录：${who}（${entry.method === 'browser' ? '登录窗口' : 'cookie'}）`;
       };
       const cookieRow = (provider, placeholder) => h('div', { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
         h('input', {
@@ -934,25 +931,24 @@ window.__ModuleLoader__.load({
           style: { ...UI.input, flex: '1 1 320px' },
         }),
         h('button', { key: 'save', type: 'button', onClick: () => void saveCookie(provider), disabled: busy !== '', style: UI.ghost }, '保存 cookie'));
-      return h('div', { style: { ...UI.card, marginBottom: 12 } },
-        h('div', { style: { fontSize: 12.5, padding: '8px 0 2px' } }, 'B站'),
-        h('div', { style: UI.muted }, statusLine('bilibili')),
+      const providerCard = (provider, title, note) => h('div', { style: { marginBottom: 14 } },
+        h('div', { style: { fontSize: 12.5 } }, title),
+        h('div', { style: UI.muted }, statusLine(provider)),
         h('div', { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
-          h('button', { type: 'button', onClick: () => void startQr(), disabled: busy !== '', style: UI.primary }, '扫码登录'),
-          qr === null || qr.url === '' ? null : h('a', {
-            key: 'qr',
-            href: `${state?.qrPageBase ?? ''}${encodeURIComponent(qr.url)}`,
-            target: '_blank',
-            rel: 'noreferrer',
-            style: { ...UI.ghost, textDecoration: 'none', display: 'inline-block' },
-          }, qr.state === 'scanned' ? '已扫码，等手机确认…' : '打开扫码页'),
-          h('button', { key: 'out', type: 'button', onClick: () => void logout('bilibili'), disabled: busy !== '', style: UI.ghost }, '退出登录')),
-        cookieRow('bilibili', '或粘贴 SESSDATA=…; bili_jct=…'),
-        h('div', { style: { ...UI.muted, marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))' } },
-          h('div', { style: { fontSize: 12.5, color: 'inherit' } }, '小红书'),
-          h('div', { style: UI.muted }, `${statusLine('xiaohongshu')}（只支持粘贴 cookie，小红书没有公开的扫码接口）`),
-          cookieRow('xiaohongshu', '粘贴 web_session=…'),
-          h('button', { type: 'button', onClick: () => void logout('xiaohongshu'), disabled: busy !== '', style: { ...UI.ghost, marginTop: 8 } }, '退出登录')),
+          h('button', { key: 'open', type: 'button', onClick: () => void openBrowser(provider), disabled: busy !== '', style: UI.primary }, '打开登录窗口'),
+          h('button', { key: 'read', type: 'button', onClick: () => void readLogin(provider), disabled: busy !== '', style: UI.ghost }, '读取登录状态'),
+          h('button', { key: 'out', type: 'button', onClick: () => void logout(provider), disabled: busy !== '', style: UI.ghost }, '退出登录')),
+        cookieRow(provider, note),
+        h('div', { style: { ...UI.muted, marginTop: 6 } },
+          '也可以不打开窗口，直接把浏览器的 cookie 粘进来'));
+      return h('div', { style: { ...UI.card, marginBottom: 12 } },
+        h('div', { style: { ...UI.muted, padding: '8px 0 10px' } },
+          state?.browser === '' || state?.browser === undefined
+            ? '没找到 Edge/Chrome，请在「连接」页签填写「登录浏览器路径」'
+            : `登录窗口使用 ${state.browser.split(/[\\/]/).pop()} 的独立配置（调试端口 ${state.debugPort}），和你平时用的浏览器完全分开`),
+        providerCard('bilibili', 'B站', '粘贴 SESSDATA=…; bili_jct=…'),
+        h('div', { style: { paddingTop: 10, borderTop: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))' } },
+          providerCard('xiaohongshu', '小红书', '粘贴 web_session=…')),
         h('div', { style: { ...UI.muted, marginTop: 10 } },
           '登录只影响 fetch_page：访问对应站点时会带上这份 cookie，其他站点不受影响；cookie 存在状态目录的 accounts.json，不会写进 config.json'),
         notice === '' ? null : h('div', { style: { ...UI.muted, marginTop: 8 } }, notice));

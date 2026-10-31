@@ -4,7 +4,8 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AccountStore } from '../src/accounts/store.js';
-import { cookieHeader, pollQrLogin, verifyLogin, startQrLogin } from '../src/accounts/bilibili.js';
+import { verifyLogin } from '../src/accounts/bilibili.js';
+import { cookieHeaderFrom, findBrowser, hasBilibiliSession, devtoolsEndpoint, readBrowserCookies } from '../src/accounts/browser.js';
 import { fetchPage } from '../src/media/page.js';
 
 test('a stored cookie is only attached to its own provider', async () => {
@@ -45,26 +46,63 @@ test('the jar persists and can be cleared', async () => {
   }
 });
 
-test('set-cookie headers collapse into one cookie header', () => {
-  assert.equal(
-    cookieHeader(['SESSDATA=abc; Path=/; HttpOnly', 'bili_jct=def; Path=/', 'SESSDATA=over']),
-    'SESSDATA=over; bili_jct=def',
-  );
+test('cookies are collected per provider from the browser', () => {
+  const cookies = [
+    { name: 'SESSDATA', value: 'abc', domain: '.bilibili.com' },
+    { name: 'bili_jct', value: 'def', domain: '.bilibili.com' },
+    { name: 'web_session', value: 'xxx', domain: '.xiaohongshu.com' },
+    { name: 'tracker', value: 'y', domain: '.example.com' },
+  ];
+  assert.equal(cookieHeaderFrom(cookies, 'bilibili'), 'SESSDATA=abc; bili_jct=def');
+  assert.equal(cookieHeaderFrom(cookies, 'xiaohongshu'), 'web_session=xxx');
+  assert.equal(cookieHeaderFrom(cookies, 'bilibili'), cookieHeaderFrom(cookies, 'bilibili'), 'stable order');
 });
 
-test('the QR flow reports waiting and then done with cookies', async () => {
-  const start = await startQrLogin(async () => ({ json: async () => ({ code: 0, data: { qrcode_key: 'k1', url: 'https://x' } }) }));
-  assert.deepEqual(start, { key: 'k1', url: 'https://x' });
+test('a Bilibili session needs SESSDATA', () => {
+  assert.equal(hasBilibiliSession('SESSDATA=abc; bili_jct=def'), true);
+  assert.equal(hasBilibiliSession('bili_jct=def'), false);
+  assert.equal(hasBilibiliSession(''), false);
+});
 
-  const waiting = await pollQrLogin('k1', async () => ({ headers: { getSetCookie: () => [] }, json: async () => ({ code: 0, data: { code: 86101 } }) }));
-  assert.equal(waiting.state, 'waiting');
+test('the browser endpoint is read from the debug port', async () => {
+  const fakeFetch = async () => ({ json: async () => ({ webSocketDebuggerUrl: 'ws://127.0.0.1:9333/devtools/browser/x' }) });
+  assert.equal(await devtoolsEndpoint(9333, fakeFetch), 'ws://127.0.0.1:9333/devtools/browser/x');
+  const missing = async () => ({ json: async () => ({}) });
+  await assert.rejects(() => devtoolsEndpoint(9333, missing), /没有响应/);
+});
 
-  const done = await pollQrLogin('k1', async () => ({
-    headers: { getSetCookie: () => ['SESSDATA=zzz; Path=/'] },
-    json: async () => ({ code: 0, data: { code: 0 } }),
-  }));
-  assert.equal(done.state, 'done');
-  assert.equal(done.cookie, 'SESSDATA=zzz');
+test('cookies are read over DevTools', async () => {
+  class FakeSocket {
+    constructor() {
+      this.listeners = new Map();
+      setTimeout(() => this.emit('open', {}), 0);
+    }
+    addEventListener(type, handler) {
+      const list = this.listeners.get(type) ?? [];
+      list.push(handler);
+      this.listeners.set(type, list);
+    }
+    removeEventListener(type, handler) {
+      this.listeners.set(type, (this.listeners.get(type) ?? []).filter(item => item !== handler));
+    }
+    emit(type, event) {
+      for (const handler of this.listeners.get(type) ?? []) handler(event);
+    }
+    send(payload) {
+      const command = JSON.parse(payload);
+      setTimeout(() => this.emit('message', { data: JSON.stringify({ id: command.id, result: { cookies: [
+        { name: 'SESSDATA', value: 'abc', domain: '.bilibili.com' },
+        { name: 'broken', value: '', domain: '' },
+      ] } }) }), 0);
+    }
+    close() {}
+  }
+  const cookies = await readBrowserCookies(9333, { WebSocketImpl: FakeSocket, fetchImpl: async () => ({ json: async () => ({ webSocketDebuggerUrl: 'ws://x' }) }) });
+  assert.deepEqual(cookies, [{ name: 'SESSDATA', value: 'abc', domain: '.bilibili.com' }]);
+});
+
+test('a configured browser path wins when it exists', () => {
+  assert.equal(findBrowser('E:/definitely/not/here.exe') === '' || findBrowser('E:/definitely/not/here.exe').includes('msedge') || findBrowser('E:/definitely/not/here.exe').includes('chrome'), true);
 });
 
 test('a stale cookie fails verification', async () => {

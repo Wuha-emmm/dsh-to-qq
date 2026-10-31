@@ -157,7 +157,8 @@ DSH 在上下文接近窗口上限时会自动压缩（默认 `thresholdRatio 0.
 
 | 站点 | 登录方式 |
 |---|---|
-| B站 | 扫码（`passport-login/web/qrcode` 生成 + 轮询）或粘贴 cookie；用 `x/web-interface/nav` 校验 |
-| 小红书 | 只支持粘贴 cookie（没有公开的扫码接口） |
+| B站 / 小红书 | 打开一个**独立的 Edge/Chrome 窗口**（自己的 `browser-profile`，不碰你平时用的浏览器），在里面手动登录；后台通过 DevTools 协议（`Storage.getCookies`）读回 cookie 保存 |
+
+扫码登录这条路 B站已经不对外提供，所以不再实现。cookie 仍可直接粘贴作为备用。B站用 `x/web-interface/nav` 校验登录态。
 
 cookie 存在状态目录的 `accounts.json`（不写进 `config.json`，面板只回状态不回 cookie）。`fetch_page` 只对匹配域名附加 cookie（`bilibili.com/b23.tv/hdslb.com`、`xiaohongshu.com/xhslink.com/xhscdn.com`），其他站点不受影响。

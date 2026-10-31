@@ -112,6 +112,12 @@ export function defaults() {
       impressionMinChars: 800,
       impressionBudget: 600,
     },
+    accounts: {
+      /** Chromium executable for the sign-in window; empty auto-detects Edge/Chrome. */
+      browserPath: '',
+      /** DevTools port the sign-in window listens on; cookies are read from it. */
+      debugPort: 9333,
+    },
     limits: {
       memberDaily: 100,
       groupDaily: 400,
@@ -222,6 +228,7 @@ export const RANGES = {
   'safety.confirmTtlMs': [10_000, 600_000],
   'models.inputPrice': [0, 1000],
   'models.outputPrice': [0, 1000],
+  'accounts.debugPort': [1024, 65535],
   'access.requestTtlMin': [1, 1440],
   'models.cachePrice': [0, 1000],
   'models.searchPrice': [0, 100],
