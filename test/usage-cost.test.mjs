@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { estimateCost, sumCosts, cacheRate } from '../src/llm/cost.js';
+import { estimateCost, sumCosts, cacheRate, isOffPeak } from '../src/llm/cost.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,7 +11,7 @@ test('cost uses each price bucket', () => {
     { inputTokens: 1_000_000, outputTokens: 500_000, cacheReadTokens: 2_000_000 },
     { input: 1, output: 2, cache: 0.1 },
   );
-  assert.deepEqual(estimate, { input: 1_000_000, output: 500_000, cache: 2_000_000, cost: 2.2 });
+  assert.deepEqual(estimate, { input: 1_000_000, output: 500_000, cache: 2_000_000, cost: 2.2, offPeak: false });
 });
 
 test('missing prices leave the cost unknown instead of zero', () => {
@@ -46,4 +46,21 @@ test('the ledger stores tokens per turn and totals them', async () => {
     archive.close?.();
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('off-peak turns cost half at the configured window', () => {
+  const prices = { input: 2, output: 8, cache: 0.04, offPeakDiscount: 0.5, offPeakWindow: '00:30-08:30' };
+  const peak = new Date(2026, 9, 31, 15, 0).getTime();
+  const night = new Date(2026, 9, 31, 3, 0).getTime();
+  const usage = { inputTokens: 1_000_000, outputTokens: 1_000_000, cacheReadTokens: 1_000_000 };
+  assert.equal(estimateCost(usage, prices, peak).cost, 10.04);
+  assert.equal(estimateCost(usage, prices, night).cost, 5.02);
+  assert.equal(estimateCost(usage, prices, night).offPeak, true);
+});
+
+test('the window is local time and may wrap midnight', () => {
+  assert.equal(isOffPeak(new Date(2026, 9, 31, 23, 0).getTime(), '22:00-02:00'), true);
+  assert.equal(isOffPeak(new Date(2026, 9, 31, 1, 0).getTime(), '22:00-02:00'), true);
+  assert.equal(isOffPeak(new Date(2026, 9, 31, 12, 0).getTime(), '22:00-02:00'), false);
+  assert.equal(isOffPeak(Date.now(), ''), false);
 });

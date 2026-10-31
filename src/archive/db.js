@@ -294,6 +294,21 @@ class Archive {
    * @param {number} sinceMs Epoch milliseconds.
    * @returns {{ turns: number, input: number, output: number, cache: number }} Totals.
    */
+  /**
+   * Every successful turn after a point in time, oldest first.
+   *
+   * Needed when the unit price depends on when the turn ran.
+   *
+   * @param {number} sinceMs Epoch milliseconds.
+   * @returns {any[]} Rows with tokens and start time.
+   */
+  turnsSince(sinceMs = 0) {
+    return this.db.prepare(`
+      SELECT scene, tier, started_at, input_tokens, output_tokens, cache_tokens
+      FROM turns WHERE ok = 1 AND started_at >= ? ORDER BY started_at ASC
+    `).all(Number(sinceMs) || 0);
+  }
+
   usageTotals(sinceMs = 0) {
     const row = this.db.prepare(`
       SELECT COUNT(*) AS turns,

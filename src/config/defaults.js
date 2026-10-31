@@ -59,10 +59,14 @@ export function defaults() {
       blockedWords: [],
     },
     models: {
+      /** Off-peak prices are this fraction of the peak ones (DeepSeek: 0.5). */
+      offPeakDiscount: 0.5,
+      /** Off-peak window in local time; empty disables the discount. */
+      offPeakWindow: '00:30-08:30',
       /** ¥ per 1M tokens; all zero means "not configured" and the panel shows tokens only. */
-      inputPrice: 0,
-      outputPrice: 0,
-      cachePrice: 0,
+      inputPrice: 2,
+      outputPrice: 8,
+      cachePrice: 0.04,
       /** Permission preset applied to each QQ session; empty leaves the deployment default. */
       permissionPreset: 'danger-full-access',
       owner: { provider: '', model: '', effort: 'high' },
@@ -239,6 +243,7 @@ export function normalize(config) {
     'output.style': ['light', 'dark', 'bubble'],
     'models.permissionPreset': ['', 'auto', 'workspace-write', 'danger-full-access'],
     'models.inputPrice': [0, 1000],
+    'models.offPeakDiscount': [0, 1],
     'models.outputPrice': [0, 1000],
     'models.cachePrice': [0, 1000],
   };

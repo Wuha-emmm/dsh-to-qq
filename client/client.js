@@ -861,7 +861,7 @@ window.__ModuleLoader__.load({
             h('div', { style: UI.muted },
               today === undefined
                 ? '读取中…'
-                : `${today.turns} 轮 · 输入 ${today.input} / 输出 ${today.output} / 缓存命中 ${today.cache}（${pct(today.cacheRate)}） · ${money(today.cost)}`)),
+                : `${today.turns} 轮（谷时 ${today.offPeakTurns ?? 0}） · 输入 ${today.input} / 输出 ${today.output} / 缓存命中 ${today.cache}（${pct(today.cacheRate)}） · ${money(today.cost)}`)),
           h('button', { type: 'button', onClick: load, style: UI.ghost }, '刷新')),
         h('div', { style: { ...UI.muted, margin: '6px 0 10px' } },
           data?.prices !== undefined && data.prices.input === 0 && data.prices.output === 0 && data.prices.cache === 0
@@ -879,7 +879,7 @@ window.__ModuleLoader__.load({
               style: { display: 'grid', gridTemplateColumns: '1.4fr .8fr .7fr .7fr .6fr .6fr', gap: 8 },
             },
               h('span', { key: 'a' }, row.scene),
-              h('span', { key: 'b' }, new Date(row.startedAt).toLocaleTimeString('zh-CN', { hour12: false })),
+              h('span', { key: 'b' }, `${new Date(row.startedAt).toLocaleTimeString('zh-CN', { hour12: false })}${row.offPeak ? ' 谷' : ''}`),
               h('span', { key: 'c' }, String(row.input)),
               h('span', { key: 'd' }, String(row.output)),
               h('span', { key: 'e' }, pct(row.cacheRate)),
@@ -1367,6 +1367,8 @@ const StickerBoard = () => {
                 fieldRow({ path: 'models.inputPrice', label: '输入 ¥/M', type: 'number' }),
                 fieldRow({ path: 'models.outputPrice', label: '输出 ¥/M', type: 'number' }),
                 fieldRow({ path: 'models.cachePrice', label: '缓存 ¥/M', type: 'number' })),
+                fieldRow({ path: 'models.offPeakDiscount', label: '空闲折扣 (0-1)', type: 'number' }),
+                fieldRow({ path: 'models.offPeakWindow', label: '空闲时段', type: 'text', placeholder: '00:30-08:30' }),
               h('div', { key: 'permission', style: { marginTop: 6 } },
                 fieldRow({
                   path: 'models.permissionPreset',

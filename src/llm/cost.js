@@ -7,13 +7,32 @@
  */
 
 /**
+ * Whether a moment falls inside an off-peak window.
+ *
+ * @param {number} at Epoch milliseconds.
+ * @param {string} window `HH:MM-HH:MM` in local time; empty disables the check.
+ * @returns {boolean} True inside the window.
+ */
+export function isOffPeak(at, window) {
+  const match = /^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/.exec(String(window ?? '').trim());
+  if (match === null) return false;
+  const date = new Date(Number(at) || Date.now());
+  const minutes = date.getHours() * 60 + date.getMinutes();
+  const start = Number(match[1]) * 60 + Number(match[2]);
+  const end = Number(match[3]) * 60 + Number(match[4]);
+  if (start === end) return false;
+  return start < end ? minutes >= start && minutes < end : minutes >= start || minutes < end;
+}
+
+/**
  * Cost of one usage record.
  *
  * @param {{ inputTokens?: number, outputTokens?: number, cacheReadTokens?: number }} usage Usage.
- * @param {{ input?: number, output?: number, cache?: number }} prices ¥ per 1M tokens.
- * @returns {{ input: number, output: number, cache: number, cost: number | null }} Tokens and ¥.
+ * @param {{ input?: number, output?: number, cache?: number, offPeakDiscount?: number, offPeakWindow?: string }} prices ¥ per 1M tokens (peak), discount and window.
+ * @param {number} [at] Epoch milliseconds of the turn; decides peak or off-peak.
+ * @returns {{ input: number, output: number, cache: number, cost: number | null, offPeak: boolean }} Tokens and ¥.
  */
-export function estimateCost(usage, prices) {
+export function estimateCost(usage, prices, at = Date.now()) {
   const input = Number(usage?.inputTokens) || 0;
   const output = Number(usage?.outputTokens) || 0;
   const cache = Number(usage?.cacheReadTokens) || 0;
@@ -21,9 +40,12 @@ export function estimateCost(usage, prices) {
   const pOut = Number(prices?.output);
   const pCache = Number(prices?.cache);
   if (!Number.isFinite(pIn) || !Number.isFinite(pOut) || !Number.isFinite(pCache) || (pIn === 0 && pOut === 0 && pCache === 0)) {
-    return { input, output, cache, cost: null };
+    return { input, output, cache, cost: null, offPeak: false };
   }
-  return { input, output, cache, cost: (input * pIn + output * pOut + cache * pCache) / 1_000_000 };
+  const offPeak = isOffPeak(at, prices?.offPeakWindow);
+  const discount = offPeak ? Math.min(1, Math.max(0, Number(prices?.offPeakDiscount) || 0)) : 1;
+  const cost = (input * pIn + output * pOut + cache * pCache) / 1_000_000 * discount;
+  return { input, output, cache, cost, offPeak };
 }
 
 /**

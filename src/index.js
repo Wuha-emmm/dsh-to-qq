@@ -39,7 +39,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.57.0';
+const VERSION = '0.57.1';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -760,6 +760,8 @@ export function apply(ctx) {
           input: Number(store.get().models.inputPrice) || 0,
           output: Number(store.get().models.outputPrice) || 0,
           cache: Number(store.get().models.cachePrice) || 0,
+          offPeakDiscount: Number(store.get().models.offPeakDiscount) || 0,
+          offPeakWindow: String(store.get().models.offPeakWindow ?? ''),
         };
         const rows = bridge.archive?.recentTurns?.(30) ?? [];
         const recent = rows.map(row => {
@@ -779,16 +781,24 @@ export function apply(ctx) {
             cache: estimate.cache,
             cacheRate: cacheRate(estimate),
             cost: estimate.cost,
+            offPeak: estimate.offPeak,
           };
         });
         const midnight = new Date();
         midnight.setHours(0, 0, 0, 0);
         const totals = bridge.archive?.usageTotals?.(midnight.getTime()) ?? { turns: 0, input: 0, output: 0, cache: 0 };
+        const dayRows = bridge.archive?.turnsSince?.(midnight.getTime()) ?? [];
+        const dayEstimates = dayRows.map(row => estimateCost(
+          { inputTokens: row.input_tokens, outputTokens: row.output_tokens, cacheReadTokens: row.cache_tokens },
+          prices,
+          row.started_at,
+        ));
         send(200, {
           prices,
           today: {
             ...totals,
-            cost: estimateCost({ inputTokens: totals.input, outputTokens: totals.output, cacheReadTokens: totals.cache }, prices).cost,
+            cost: dayEstimates.every(item => item.cost !== null) ? dayEstimates.reduce((sum, item) => sum + (item.cost ?? 0), 0) : null,
+            offPeakTurns: dayEstimates.filter(item => item.offPeak).length,
             cacheRate: cacheRate(totals),
           },
           recent,
@@ -1057,6 +1067,7 @@ export function apply(ctx) {
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
 }
+
 
 
 

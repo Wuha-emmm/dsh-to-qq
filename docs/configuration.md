@@ -42,9 +42,11 @@
 
 | 键 | 默认值 | 范围 | 说明 |
 |---|---|---|---|
-| `inputPrice` | `0` | — |  |
-| `outputPrice` | `0` | — |  |
-| `cachePrice` | `0` | — |  |
+| `offPeakDiscount` | `0.5` | — |  |
+| `offPeakWindow` | `00:30-08:30` | — |  |
+| `inputPrice` | `2` | — |  |
+| `outputPrice` | `8` | — |  |
+| `cachePrice` | `0.04` | — |  |
 | `permissionPreset` | `danger-full-access` | — |  |
 | `owner.provider` | `""`（空） | — | 管理员私聊使用的服务商；空 = DSH 默认 |
 | `owner.model` | `""`（空） | — | 管理员私聊模型；空 = 该服务商首个模型 |
