@@ -75,7 +75,7 @@ export function registerBilibiliTool(ctx, options) {
   return ctx.tools.register({
     name: 'bilibili',
     description:
-      'Act on Bilibili with the account signed in through the 登录 tab. Actions: "search" a keyword in a real browser tab (so it lands in the account history) and return the top videos; "open" a video/URL in that browser; "subtitle" read what a video says through its captions (cheapest way to know the content); "comment" on a video; "dynamic" publish a plain-text dynamic; "history" mark a video as watched; "watch" play it muted so Bilibili may record it. For a mention pass mention as the Bilibili uid: a bare @name in the text links to whoever happens to own that nickname, which is usually not the person meant. Writing needs the cookie; risk control may refuse with its own message.',
+      'Act on Bilibili with the account signed in through the 登录 tab. To read what a video says, use action "subtitle" first: it returns the captions (AI captions included) and is far cheaper than fetching the page or guessing from comments/danmaku. Actions: "search" a keyword in a real browser tab (so it lands in the account history) and return the top videos; "open" a video/URL in that browser; "subtitle" read what a video says through its captions (cheapest way to know the content); "comment" on a video; "dynamic" publish a plain-text dynamic; "history" mark a video as watched; "watch" play it muted so Bilibili may record it. For a mention pass mention as the Bilibili uid: a bare @name in the text links to whoever happens to own that nickname, which is usually not the person meant. Writing needs the cookie; risk control may refuse with its own message.',
     parameters: {
       type: 'object',
       additionalProperties: false,
