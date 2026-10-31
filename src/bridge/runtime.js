@@ -11,6 +11,7 @@ import { OneBotClient } from '../transport/onebot.js';
 import { normalizeEvent, chunkText, flattenSegments } from './events.js';
 import { normalizeRequestEvent, describeRequest } from './requests.js';
 import { buildReplySegments, memberNames } from './mentions.js';
+import { shouldSendNotice } from './notice.js';
 import { admit, blockedWord, tierOf } from '../policy/tiers.js';
 import { Quota, Semaphore } from '../policy/quota.js';
 import { looksLikeApproval } from '../policy/approvals.js';
@@ -387,6 +388,8 @@ export class Bridge {
     this.continuedSessions = new Set();
     /** How often DSH condensed a session and when; shown by qq_status. */
     this.compactionStats = { count: 0, lastAt: 0 };
+    /** Scene -> last bridge notice, so a template is not repeated verbatim. */
+    this.sentNotices = new Map();
     /** Group id -> { at, members } for @mentions in replies. */
     this.memberCache = new Map();
     /** Pending friend/group requests waiting for an administrator's answer. */
@@ -1070,7 +1073,7 @@ export class Bridge {
       if (allowAll) {
         const minutes = Math.max(1, Number(this.store.get().safety.toolGrantMinutes) || 15);
         const granted = this.approvals.grantTools(message.scene, ['pwsh', 'edit', 'write', 'plugin_manager'], minutes * 60_000);
-        await this.sendText(message, `已放行全部工具 ${minutes} 分钟（${granted.tools.join('、')}），正在继续刚才的操作…`);
+        await this.#notice(message, `已放行全部工具 ${minutes} 分钟（${granted.tools.join('、')}），正在继续刚才的操作…`);
         await this.#resumeAfterApproval(message, '所有危险工具已放行 5 分钟');
         return;
       }
@@ -1081,7 +1084,7 @@ export class Bridge {
           return;
         }
         this.approvals.grantTool(message.scene, tool, Math.max(1, Number(this.store.get().safety.toolGrantMinutes) || 15) * 60_000);
-        await this.sendText(message, `已放行 ${tool} ${Math.max(1, Number(this.store.get().safety.toolGrantMinutes) || 15)} 分钟，正在继续刚才的操作…（要多工具一起放行就发 /全放行）`);
+        await this.#notice(message, `已放行 ${tool} ${Math.max(1, Number(this.store.get().safety.toolGrantMinutes) || 15)} 分钟，正在继续刚才的操作…（要多工具一起放行就发 /全放行）`);
         await this.#resumeAfterApproval(message, '该工具已放行 5 分钟');
         return;
       }
@@ -1978,6 +1981,21 @@ export class Bridge {
       }
     }
     return members;
+  }
+
+  /**
+   * Send a fixed bridge notice unless the same one just went out.
+   *
+   * @param {import('./events.js').QQMessage} message Triggering message.
+   * @param {string} text Notice body.
+   * @returns {Promise<void>} Resolves after the decision.
+   */
+  async #notice(message, text) {
+    if (!shouldSendNotice(this.sentNotices, message.scene, text)) {
+      this.log(`notice suppressed (already sent): ${text.slice(0, 40)}`);
+      return;
+    }
+    await this.sendText(message, text);
   }
 
   async sendText(message, text, options = {}) {
