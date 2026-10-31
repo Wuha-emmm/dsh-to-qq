@@ -82,6 +82,7 @@ Host 半边负责接入、判权、上下文、记忆、档案与工具；Client
 | [排障](docs/troubleshooting.md) | 常见故障与日志位置 |
 | [SnowLuma 备忘](docs/snowluma.md) | 端口、双 token、状态码 |
 | [路线](docs/roadmap.md) | 已完成与下一步 |
+| [更新记录](CHANGELOG.md) | 每个版本改了什么（一句话一条） |
 
 ## 开发
 
