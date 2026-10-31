@@ -103,9 +103,9 @@ export function extractSessions(value) {
           : [];
   return raw
     .map(item => (item !== null && typeof item === 'object' ? { ...item } : null))
-    .filter(item => item !== null && typeof item.id === 'string')
+    .filter(item => item !== null && (typeof item.id === 'string' || typeof item.sessionId === 'string'))
     .map(item => ({
-      id: item.id,
+      id: item.id ?? item.sessionId,
       title: item.title ?? item.summary,
       updatedAt: item.updatedAt,
       cwd: typeof item.cwd === 'string' ? item.cwd : undefined,

@@ -1376,7 +1376,12 @@ export class Bridge {
     const config = this.store.get();
     const keepHours = Math.max(1, Number(config.conversation.cleanupKeepHours) || 24);
     const items = extractSessions(await this.controller.list({}, AbortSignal.timeout(8000)));
-    const bound = Object.values(this.map?.all?.() ?? {});
+    // Guest-tier group sessions are bound in guests.json rather than the scene
+    // map, so they must be protected too or cleanup would hide a live group.
+    const bound = [
+      ...Object.values(this.map?.all?.() ?? {}),
+      ...Object.keys(this.driver?.guestStore?.all?.() ?? {}),
+    ];
     const candidates = cleanupCandidates(items, {
       bound: new Set(bound),
       keepMs: keepHours * 3600_000,
