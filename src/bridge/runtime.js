@@ -1131,7 +1131,10 @@ export class Bridge {
       if (mark !== undefined) {
         this.rebuildMarks.delete(message.scene);
         void this.#saveRebuildMarks().catch(() => {});
-        const rows = this.archive?.search?.({ scene: message.scene, limit: 14 }) ?? [];
+        // The trigger was archived at admission, so the newest row can be this
+        // very message; drop it or the recap repeats the current question.
+        const rows = (this.archive?.search?.({ scene: message.scene, limit: 15 }) ?? [])
+          .filter(row => String(row.msg_id ?? '') !== String(message.messageId));
         for (const row of rows) {
           injection.seen.add(entrySignature({ time: Number(row.time_unix) || 0, senderId: Number(row.sender_id) || 0, text: row.text ?? '' }));
         }

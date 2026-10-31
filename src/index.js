@@ -39,7 +39,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.60.0';
+const VERSION = '0.60.1';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -1083,6 +1083,7 @@ export function apply(ctx) {
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
 }
+
 
 
 
