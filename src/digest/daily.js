@@ -26,6 +26,41 @@ export function startOfBeijingDay(now = Date.now()) {
 }
 
 /**
+ * Resolve a day selector into a Beijing-day window.
+ *
+ * The tool used to read only "today", so a request for 昨日日报 silently returned
+ * the few hours of today that had already happened.
+ *
+ * @param {string} [input] `today`, `yesterday`, or `YYYY-MM-DD`.
+ * @param {number} [now] Epoch milliseconds.
+ * @returns {{ startMs: number, endMs: number, sinceUnix: number, untilUnix: number, label: string, key: string }} Window.
+ */
+export function dayRange(input = 'today', now = Date.now()) {
+  const raw = String(input ?? '').trim().toLowerCase();
+  let startMs = startOfBeijingDay(now);
+  if (raw === 'yesterday' || raw === '昨天' || raw === '昨日') {
+    startMs -= 86_400_000;
+  } else if (raw === 'today' || raw === '今天' || raw === '今日' || raw === '') {
+    // already today
+  } else if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const parsed = Date.parse(`${raw}T00:00:00+08:00`);
+    if (!Number.isNaN(parsed)) startMs = parsed;
+  }
+  const endMs = startMs + 86_400_000;
+  const date = new Date(startMs + BJ_OFFSET);
+  const label = `${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+  const key = `${date.getUTCFullYear()}-${label}`;
+  return {
+    startMs,
+    endMs,
+    sinceUnix: Math.floor(startMs / 1000),
+    untilUnix: Math.floor(endMs / 1000),
+    label,
+    key,
+  };
+}
+
+/**
  * Summarize archived rows.
  *
  * @param {ReadonlyArray<{ sender_id?: number, sender_name?: string, time_unix: number, media_kind?: string | null }>} rows Archive rows, any order.

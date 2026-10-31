@@ -2,7 +2,7 @@
  * `group_digest`: answer "今天群里聊了啥" with the same card as `/日报`.
  */
 
-import { summarizeDigest, startOfBeijingDay, DIGEST_ROW_LIMIT } from '../digest/daily.js';
+import { summarizeDigest, dayRange, DIGEST_ROW_LIMIT } from '../digest/daily.js';
 import { renderDigestCard } from '../render/memory-card.js';
 
 /**
@@ -17,11 +17,12 @@ import { renderDigestCard } from '../render/memory-card.js';
 export function registerDigestTool(ctx, options) {
   return ctx.tools.register({
     name: 'group_digest',
-    description: 'Render today\'s digest of this group — message count, busiest hour, and the top talkers — as an image and send it here. Use it when someone asks what the group talked about today, 今天的日报, or 群里今天热闹吗. The image is the answer: do not announce the send in your reply, and stay silent after a successful call unless something failed.',
+    description: 'Render a digest of this group — message count, busiest hour, and the top talkers — as an image and send it here. Pass day "yesterday" for 昨日日报 (or a YYYY-MM-DD date); default is today. Use it when someone asks what the group talked about today/yesterday. The image is the answer: do not announce the send in your reply, and stay silent after a successful call unless something failed.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
+        day: { type: 'string', description: 'Which day: "today" (default), "yesterday", or "YYYY-MM-DD".' },
         group_id: { type: 'number', description: 'Optional group id; administrators only. Defaults to the current group.' },
       },
     },
@@ -40,8 +41,10 @@ export function registerDigestTool(ctx, options) {
         : Number(info.scene.slice(info.scene.indexOf(':') + 1));
       if (!Number.isInteger(gid) || gid <= 0) throw new Error('this conversation is not a group');
 
-      const since = Math.floor(startOfBeijingDay() / 1000);
-      const rows = bridge.archive?.search({ scene: `group:${gid}`, since, limit: DIGEST_ROW_LIMIT }) ?? [];
+      const window = dayRange(String(args.day ?? 'today'));
+      const since = window.sinceUnix;
+      const rows = (bridge.archive?.search({ scene: `group:${gid}`, since, limit: DIGEST_ROW_LIMIT }) ?? [])
+        .filter(row => Number(row.time_unix) < window.untilUnix);
       const summary = summarizeDigest(rows);
 
       let name = '';
@@ -51,7 +54,7 @@ export function registerDigestTool(ctx, options) {
       } catch {
         name = '';
       }
-      const dayLabel = new Date().toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
+      const dayLabel = window.label;
       const payload = await renderDigestCard({ gid, name, dayLabel, summary }, {
         log: options.log,
         backdropDir: bridge.mediaDir,
@@ -63,8 +66,9 @@ export function registerDigestTool(ctx, options) {
       );
       options.log(`digest card sent to group ${gid}`);
       bridge.noteCardSent?.();
-      bridge.recordSceneOutbound?.(`group:${gid}`, `[图片] 群日报 ${summary.total} 条消息`, 'image');
-      return { report: `已把今天的群日报发到群里（${summary.total} 条消息）。`, total: summary.total };
+      bridge.recordSceneOutbound?.(`group:${gid}`, `[图片] 群日报 ${dayLabel} ${summary.total} 条消息`, 'image');
+      const name_ = window.key === dayRange('today').key ? '今天' : `${window.label}`;
+      return { report: `已把${name_}的群日报发到群里（${summary.total} 条消息）。`, total: summary.total };
     },
     presentCall: () => ({ card: 'generic', title: 'Group digest', kind: 'other', rawInput: {} }),
   });

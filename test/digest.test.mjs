@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { summarizeDigest, formatDigest, startOfBeijingDay } from '../src/digest/daily.js';
+import { summarizeDigest, formatDigest, startOfBeijingDay, dayRange } from '../src/digest/daily.js';
 
 const at = (hourBj, minute = 0) => Date.UTC(2026, 9, 30, hourBj - 8, minute) / 1000;
 
@@ -72,3 +72,26 @@ test('formatDigest lists the peak hour and the top talkers', () => {
   assert.match(text, /阿明 —— 2 条/);
 });
 
+test('a day window covers exactly one Beijing day', () => {
+  const now = Date.UTC(2026, 10, 1, 4, 5); // 12:05 Beijing on 1 Nov
+  const today = dayRange('today', now);
+  const yesterday = dayRange('yesterday', now);
+  assert.equal(today.key, '2026-11-01');
+  assert.equal(yesterday.key, '2026-10-31');
+  assert.equal(today.untilUnix - today.sinceUnix, 86_400);
+  assert.equal(yesterday.untilUnix, today.sinceUnix);
+  assert.equal(dayRange('2026-10-30', now).key, '2026-10-30');
+  assert.equal(dayRange('昨天', now).key, '2026-10-31');
+});
+
+test('yesterday rows are excluded from today and counted in yesterday', () => {
+  const now = Date.UTC(2026, 10, 1, 4, 5);
+  const rows = [
+    { sender_id: 1, sender_name: '甲', time_unix: dayRange('today', now).sinceUnix + 60, direction: 'in', text: '今晚说的' },
+    { sender_id: 2, sender_name: '乙', time_unix: dayRange('yesterday', now).sinceUnix + 60, direction: 'in', text: '昨晚说的' },
+  ];
+  const pick = day => rows.filter(row => row.time_unix >= dayRange(day, now).sinceUnix && row.time_unix < dayRange(day, now).untilUnix);
+  assert.equal(summarizeDigest(pick('today')).total, 1);
+  assert.equal(summarizeDigest(pick('yesterday')).total, 1);
+  assert.equal(summarizeDigest(pick('today')).top[0][0], '甲');
+});

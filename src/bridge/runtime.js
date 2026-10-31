@@ -31,7 +31,7 @@ import { saveThumbnail, readThumbnail } from '../media/thumbnail.js';
 import { wantsNoStickers, wantsStickers } from '../stickers/mute.js';
 import { fileSegments, fetchInboundFile } from '../media/inbound-file.js';
 import { renderMemoryCard, renderDigestCard } from '../render/memory-card.js';
-import { summarizeDigest, formatDigest, startOfBeijingDay, DIGEST_ROW_LIMIT } from '../digest/daily.js';
+import { summarizeDigest, formatDigest, dayRange, DIGEST_ROW_LIMIT } from '../digest/daily.js';
 import { dueForAutoNote, autoNotePrompt } from '../memory/autonote.js';
 import { summarizeImpressions, backfillImpressions } from './impression-run.js';
 import { shouldStaySilent } from './reply.js';
@@ -493,15 +493,17 @@ export class Bridge {
    * @param {string} [label] Human label for the scene.
    * @returns {Promise<boolean>} True when a message was sent.
    */
-  async sendDigestTo(scene, label) {
+  async sendDigestTo(scene, label, day = 'today') {
     if (this.archive === null || this.archive === undefined || this.client === undefined) return false;
     if (!scene.startsWith('group:')) return false;
-    const since = Math.floor(startOfBeijingDay() / 1000);
-    const rows = this.archive.search({ scene, since, limit: DIGEST_ROW_LIMIT });
+    const window = dayRange(day);
+    const since = window.sinceUnix;
+    const rows = this.archive.search({ scene, since, limit: DIGEST_ROW_LIMIT })
+      .filter(row => Number(row.time_unix) < window.untilUnix);
     const text = formatDigest(
       summarizeDigest(rows),
       label ?? `群 ${scene.slice(6)}`,
-      new Date().toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }),
+      window.label,
     );
     await this.client.call(
       'send_group_msg',
@@ -787,11 +789,16 @@ export class Bridge {
           await this.sendText(message, '档案不可用，出不了日报。');
           return;
         }
-        const scene = command.arg === '' ? message.scene : `group:${command.arg}`;
-        const since = Math.floor(startOfBeijingDay() / 1000);
+        const parts = String(command.arg ?? '').split(/\s+/).filter(Boolean);
+        const dayWord = parts.find(part => /^(today|yesterday|今天|今日|昨天|昨日|\d{4}-\d{2}-\d{2})$/i.test(part)) ?? 'today';
+        const numeric = parts.find(part => /^\d+$/.test(part));
+        const scene = numeric === undefined ? message.scene : `group:${numeric}`;
+        const window = dayRange(dayWord);
+        const since = window.sinceUnix;
         let rows = [];
         try {
-          rows = this.archive.search({ scene, since, limit: DIGEST_ROW_LIMIT });
+          rows = this.archive.search({ scene, since, limit: DIGEST_ROW_LIMIT })
+            .filter(row => Number(row.time_unix) < window.untilUnix);
         } catch (error) {
           await this.sendText(message, `读档案失败：${String(error?.message ?? error).slice(0, 140)}`);
           return;
@@ -806,7 +813,7 @@ export class Bridge {
             // keep the number
           }
         }
-        const dayLabel = new Date().toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
+        const dayLabel = window.label;
         const summary = summarizeDigest(rows);
         // Same template as the memory card; text is the fallback when rendering fails.
         try {
