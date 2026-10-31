@@ -44,7 +44,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.76.0';
+const VERSION = '0.76.1';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -1221,6 +1221,7 @@ export function apply(ctx) {
     log,
   }));
 }
+
 
 
 

@@ -191,6 +191,6 @@ WBI 签名：从 `nav` 取 `wbi_img` 两个 key，按固定置换表混成 32 �
 
 ## 群日报的日期窗口
 
-`group_digest` 与 `/日报` 都接受日期：`day: "today" | "yesterday" | "YYYY-MM-DD"`（中文「今天/昨天」也认）。窗口由 `dayRange()` 按北京时间算出 `[start, end)`，查询用 `since` 起点 + `time_unix < end` 过滤。
+`group_digest` 与 `/日报` 都接受日期：`today`、`yesterday`、`daybefore`（前天/前日）、`YYYY-MM-DD`、`N天前`/`-N`（中文「今天/昨天/前天」也认）。窗口由 `dayRange()` 按北京时间算出 `[start, end)`，查询用 `since` 起点 + `time_unix < end` 过滤。
 
 0.76 之前只读「今天 00:00 到现在」，所以在凌晨要「昨日日报」时，拿到的是当天刚过去几个小时的几十条，而不是前一天的完整数据（实测同一群：今天 121 条 / 昨天 1357 条）。

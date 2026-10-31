@@ -17,12 +17,12 @@ import { renderDigestCard } from '../render/memory-card.js';
 export function registerDigestTool(ctx, options) {
   return ctx.tools.register({
     name: 'group_digest',
-    description: 'Render a digest of this group — message count, busiest hour, and the top talkers — as an image and send it here. Pass day "yesterday" for 昨日日报 (or a YYYY-MM-DD date); default is today. Use it when someone asks what the group talked about today/yesterday. The image is the answer: do not announce the send in your reply, and stay silent after a successful call unless something failed.',
+    description: 'Render a digest of this group — message count, busiest hour, and the top talkers — as an image and send it here. Pass day for anything but today: "yesterday" (昨日/昨天), "daybefore" (前日/前天), "YYYY-MM-DD", or "N天前". Use it when someone asks what the group talked about that day. The image is the answer: do not announce the send in your reply, and stay silent after a successful call unless something failed.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        day: { type: 'string', description: 'Which day: "today" (default), "yesterday", or "YYYY-MM-DD".' },
+        day: { type: 'string', description: 'Which day: "today" (default), "yesterday", "daybefore", "YYYY-MM-DD", or "N天前".' },
         group_id: { type: 'number', description: 'Optional group id; administrators only. Defaults to the current group.' },
       },
     },

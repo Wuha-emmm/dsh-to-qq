@@ -31,7 +31,10 @@ export function startOfBeijingDay(now = Date.now()) {
  * The tool used to read only "today", so a request for 昨日日报 silently returned
  * the few hours of today that had already happened.
  *
- * @param {string} [input] `today`, `yesterday`, or `YYYY-MM-DD`.
+ * Accepts `today`, `yesterday`, `daybefore` (前天/前日), `YYYY-MM-DD`, and a
+ * relative form `N天前` or `-N` for any other day the archive still holds.
+ *
+ * @param {string} [input] Day selector.
  * @param {number} [now] Epoch milliseconds.
  * @returns {{ startMs: number, endMs: number, sinceUnix: number, untilUnix: number, label: string, key: string }} Window.
  */
@@ -40,11 +43,20 @@ export function dayRange(input = 'today', now = Date.now()) {
   let startMs = startOfBeijingDay(now);
   if (raw === 'yesterday' || raw === '昨天' || raw === '昨日') {
     startMs -= 86_400_000;
+  } else if (raw === 'daybefore' || raw === '前天' || raw === '前日' || raw === '前日日报') {
+    startMs -= 2 * 86_400_000;
   } else if (raw === 'today' || raw === '今天' || raw === '今日' || raw === '') {
     // already today
   } else if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
     const parsed = Date.parse(`${raw}T00:00:00+08:00`);
     if (!Number.isNaN(parsed)) startMs = parsed;
+  } else {
+    // "3天前" / "-3" / "3d"
+    const relative = /^(\d+)\s*天前$/.exec(raw) ?? /^-(\d{1,3})$/.exec(raw) ?? /^(\d{1,3})d$/.exec(raw);
+    if (relative !== null) {
+      const days = Number(relative[1]);
+      if (Number.isInteger(days) && days >= 0 && days <= 365) startMs -= days * 86_400_000;
+    }
   }
   const endMs = startMs + 86_400_000;
   const date = new Date(startMs + BJ_OFFSET);

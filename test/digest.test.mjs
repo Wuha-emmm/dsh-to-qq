@@ -95,3 +95,13 @@ test('yesterday rows are excluded from today and counted in yesterday', () => {
   assert.equal(summarizeDigest(pick('yesterday')).total, 1);
   assert.equal(summarizeDigest(pick('today')).top[0][0], '甲');
 });
+
+test('the day before yesterday and relative days resolve too', () => {
+  const now = Date.UTC(2026, 10, 1, 4, 5);
+  assert.equal(dayRange('前天', now).key, '2026-10-30');
+  assert.equal(dayRange('前日', now).key, '2026-10-30');
+  assert.equal(dayRange('daybefore', now).key, '2026-10-30');
+  assert.equal(dayRange('3天前', now).key, '2026-10-29');
+  assert.equal(dayRange('-3', now).key, '2026-10-29');
+  assert.equal(dayRange('2026-10-20', now).key, '2026-10-20');
+});
