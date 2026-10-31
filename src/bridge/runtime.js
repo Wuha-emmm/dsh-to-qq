@@ -1164,7 +1164,12 @@ export class Bridge {
       const nudge = dueForAutoNote(turnNumber, config.memory.autoNoteEvery) ? autoNotePrompt() : '';
       // Sticker catalog: only when the tool is available for this tier.
       const stickerNote = this.stickerBlock(message.scene, injection);
-      const bodyText = `${promptBase}${imageNote}${voiceNote}${fileNote}${forwardNote}${stickerNote}${nudge}`;
+      // Reply length: asked once per session; the image path enforces it.
+      const lengthLimit = Number(config.output.maxReplyChars) || 0;
+      const lengthNote = lengthLimit > 0
+        ? injection.fixed('length', `【回复长度】尽量控制在 ${lengthLimit} 字以内；内容较长时正常输出，我会自动转成图片发出去。`)
+        : '';
+      const bodyText = `${promptBase}${imageNote}${voiceNote}${fileNote}${forwardNote}${stickerNote}${lengthNote}${nudge}`;
       const text = seed === undefined ? bodyText : `${seed}\n\n${bodyText}`;
       this.contextStats = { chars: text.length, ...injection.stats };
       if (injection.skipped > 0) {
@@ -1208,7 +1213,11 @@ export class Bridge {
         return;
       }
       const body = result.text.trim() === '' ? '（这轮没有文本回复）' : result.text.trim();
-      const asImage = body.length > config.output.imageThreshold
+      const limitCandidates = [config.output.imageThreshold, config.output.maxReplyChars]
+        .map(value => Number(value) || 0)
+        .filter(value => value > 0);
+      const replyLimit = limitCandidates.length > 0 ? Math.min(...limitCandidates) : Number.MAX_SAFE_INTEGER;
+      const asImage = body.length > replyLimit
         ? await this.sendLongReply(message, body, config, result.reasoning)
         : false;
       if (!asImage) {

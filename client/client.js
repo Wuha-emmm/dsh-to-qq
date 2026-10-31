@@ -595,6 +595,7 @@ window.__ModuleLoader__.load({
           { path: 'digest.hour', label: '日报时间 · 时（0-23）', type: 'number' },
           { path: 'digest.minute', label: '日报时间 · 分（0-59）', type: 'number' },
           { path: 'output.imageThreshold', label: '转图阈值（字）', type: 'number' },
+      { path: 'output.maxReplyChars', label: '回复长度上限（字）', type: 'number' },
           {
             path: 'output.style',
             label: '图片样式',
@@ -756,6 +757,7 @@ window.__ModuleLoader__.load({
       'memory.impressionMinChars': '触发前至少要有多少有效字数',
       'memory.impressionBudget': '印象列表的总字数上限',
       'output.imageThreshold': '回答超过这个字数就转成图片',
+      'output.maxReplyChars': '让模型尽量写这么短；超长的回复自动转成图片（0 = 不提示）',
       'output.style': '图片风格：浅色 / 深色 / 气泡',
       'output.fontSize': '图片字号',
       'output.sendTypingStatus': '回答前显示“正在输入”',

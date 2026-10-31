@@ -99,6 +99,8 @@ export function defaults() {
     },
     output: {
       imageThreshold: 500,
+  /** The model is asked to stay within this many characters; longer replies render as an image. 0 = no hint. */
+  maxReplyChars: 250,
       /** light | dark | bubble */
       style: 'light',
       fontSize: 22,
@@ -178,6 +180,7 @@ export const RANGES = {
   'limits.jitterMs': [0, 10000],
   'limits.maxDelayMs': [0, 120000],
   'output.imageThreshold': [100, 5000],
+  'output.maxReplyChars': [0, 4000],
   'output.fontSize': [14, 48],
   'output.width': [600, 2000],
   'archive.retentionDays': [0, 3650],
