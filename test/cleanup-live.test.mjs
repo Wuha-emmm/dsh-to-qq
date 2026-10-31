@@ -9,13 +9,13 @@ const HOUR = 3600_000;
 
 function makeBridge(dir, archived) {
   const items = [
-    { sessionId: 'session-old', updatedAt: Date.now() - 48 * HOUR, running: false, blank: false, cwd: 'E:\\DSH-to-QQ' },
-    { sessionId: 'session-group', updatedAt: Date.now() - 48 * HOUR, running: false, blank: false, cwd: 'E:\\DSH-to-QQ' },
-    { sessionId: 'session-fresh', updatedAt: Date.now() - 60_000, running: false, blank: false, cwd: 'E:\\DSH-to-QQ' },
+    { sessionId: 'session-old', updatedAt: Date.now() - 48 * HOUR, running: false, blank: false, cwd: 'E:\\work\\qq-bridge' },
+    { sessionId: 'session-group', updatedAt: Date.now() - 48 * HOUR, running: false, blank: false, cwd: 'E:\\work\\qq-bridge' },
+    { sessionId: 'session-fresh', updatedAt: Date.now() - 60_000, running: false, blank: false, cwd: 'E:\\work\\qq-bridge' },
     { sessionId: 'session-other', updatedAt: Date.now() - 48 * HOUR, running: false, blank: false, cwd: 'D:\\elsewhere' },
   ];
   return new Bridge({
-    store: { get: () => ({ connection: { botUin: 0 }, access: {}, limits: {}, conversation: { cwd: 'E:\\DSH-to-QQ', cleanupKeepHours: 24, archiveOldSessions: true }, memory: {}, stickers: {} }) },
+    store: { get: () => ({ connection: { botUin: 0 }, access: {}, limits: {}, conversation: { cwd: 'E:\\work\\qq-bridge', cleanupKeepHours: 24, archiveOldSessions: true }, memory: {}, stickers: {} }) },
     log: () => {},
     stateDir: dir,
     map: { all: () => ({ 'dm:1': 'session-dm' }), get: () => undefined, remove: async () => {} },

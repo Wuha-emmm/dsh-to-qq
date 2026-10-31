@@ -7,12 +7,12 @@ const NOW = 1_000_000_000;
 
 function items() {
   return [
-    { id: 'old', updatedAt: NOW - 2 * DAY, cwd: 'E:\\DSH-to-QQ' },
-    { id: 'bound', updatedAt: NOW - 3 * DAY, cwd: 'E:\\DSH-to-QQ' },
-    { id: 'fresh', updatedAt: NOW - 60_000, cwd: 'E:\\DSH-to-QQ' },
+    { id: 'old', updatedAt: NOW - 2 * DAY, cwd: 'E:\\work\\qq-bridge' },
+    { id: 'bound', updatedAt: NOW - 3 * DAY, cwd: 'E:\\work\\qq-bridge' },
+    { id: 'fresh', updatedAt: NOW - 60_000, cwd: 'E:\\work\\qq-bridge' },
     { id: 'elsewhere', updatedAt: NOW - 5 * DAY, cwd: 'E:\\other-work' },
-    { id: 'running', updatedAt: NOW - 5 * DAY, cwd: 'E:\\DSH-to-QQ', running: true },
-    { id: 'archived', updatedAt: NOW - 5 * DAY, cwd: 'E:\\DSH-to-QQ', archived: true },
+    { id: 'running', updatedAt: NOW - 5 * DAY, cwd: 'E:\\work\\qq-bridge', running: true },
+    { id: 'archived', updatedAt: NOW - 5 * DAY, cwd: 'E:\\work\\qq-bridge', archived: true },
   ];
 }
 
@@ -20,7 +20,7 @@ test('cleanup only takes old, idle, unbound sessions in the bridge folder', () =
   const picked = cleanupCandidates(items(), {
     bound: new Set(['bound']),
     keepMs: DAY,
-    cwd: 'e:\\dsh-to-qq',
+    cwd: 'e:\\work\\qq-bridge',
     now: NOW,
   });
   assert.deepEqual(picked.map(item => item.id), ['old']);
@@ -43,6 +43,6 @@ test('the oldest candidates come first', () => {
 });
 
 test('the controller rows keep the fields a cleanup needs', () => {
-  const value = { items: [{ id: 's1', title: '【私】小明', updatedAt: 5, cwd: 'E:\\DSH-to-QQ', archived: true, running: true }] };
-  assert.deepEqual(extractSessions(value), [{ id: 's1', title: '【私】小明', updatedAt: 5, cwd: 'E:\\DSH-to-QQ', archived: true, running: true }]);
+  const value = { items: [{ id: 's1', title: '【私】小明', updatedAt: 5, cwd: 'E:\\work\\qq-bridge', archived: true, running: true }] };
+  assert.deepEqual(extractSessions(value), [{ id: 's1', title: '【私】小明', updatedAt: 5, cwd: 'E:\\work\\qq-bridge', archived: true, running: true }]);
 });

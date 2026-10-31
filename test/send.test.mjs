@@ -9,8 +9,8 @@ test('toImageSource keeps URLs and base64 payloads untouched', () => {
 });
 
 test('toImageSource turns Windows paths into file URIs', () => {
-  assert.equal(toImageSource('E:\\DSH-to-QQ\\out.png'), 'file:///E:/DSH-to-QQ/out.png');
-  assert.equal(toImageSource('E:/DSH-to-QQ/out.png'), 'file:///E:/DSH-to-QQ/out.png');
+  assert.equal(toImageSource('E:\\work\\qq-bridge\\out.png'), 'file:///E:/work/qq-bridge/out.png');
+  assert.equal(toImageSource('E:/work/qq-bridge/out.png'), 'file:///E:/work/qq-bridge/out.png');
 });
 
 test('toImageSource trims whitespace', () => {
