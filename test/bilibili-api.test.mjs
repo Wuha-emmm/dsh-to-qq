@@ -12,6 +12,7 @@ import {
   reportHistory,
   userName,
   withMention,
+  videoSubtitles,
 } from '../src/accounts/bilibili-api.js';
 
 const COOKIE = 'SESSDATA=abc; bili_jct=csrf123; DedeUserID=42';
@@ -151,4 +152,36 @@ test('a comment can carry a resolved mention', async () => {
   assert.equal(result.ok, true);
   const reply = calls.find(call => String(call.url).includes('/reply/add'));
   assert.match(decodeURIComponent(reply.init.body.replace(/\+/g, ' ')), /@呜哈丶emmm/);
+});
+
+test('subtitles are read from the player API track', async () => {
+  const calls = [];
+  const fakeFetch = async (url, init) => {
+    calls.push({ url, init });
+    if (String(url).includes('/nav')) {
+      return { json: async () => ({ code: 0, data: { isLogin: true, wbi_img: { img_url: 'https://x/a.png', sub_url: 'https://x/b.png' } } }) };
+    }
+    if (String(url).includes('/x/player')) {
+      return { json: async () => ({ code: 0, data: { subtitle: { subtitles: [{ lan: 'ai-zh', lan_doc: '中文', subtitle_url: '//aisubtitle.hdslb.com/bfs/subtitle/1.json' }] } } }) };
+    }
+    return { json: async () => ({ body: [{ from: 0, to: 1, content: '第一句' }, { from: 1, to: 2, content: '第二句' }, { from: 2, to: 3, content: '  ' }] }) };
+  };
+  const subs = await videoSubtitles({ aid: 11, cid: 22, bvid: 'BV1aa411c7mD', cookie: COOKIE }, fakeFetch);
+  assert.equal(subs.lan, 'ai-zh');
+  assert.equal(subs.lines.length, 2);
+  assert.equal(subs.chars, '第一句\n第二句'.length);
+  const player = calls.find(call => String(call.url).includes('/x/player'));
+  assert.match(String(player.url), /w_rid=/);
+  const track = calls.find(call => String(call.url).includes('aisubtitle'));
+  assert.match(String(track.url), /^https:\/\/aisubtitle/);
+});
+
+test('a video without captions yields nothing', async () => {
+  const fakeFetch = async url => {
+    if (String(url).includes('/nav')) {
+      return { json: async () => ({ code: 0, data: { isLogin: true, wbi_img: { img_url: 'https://x/a.png', sub_url: 'https://x/b.png' } } }) };
+    }
+    return { json: async () => ({ code: 0, data: { subtitle: { subtitles: [] } } }) };
+  };
+  assert.equal(await videoSubtitles({ aid: 1, cid: 2, cookie: COOKIE }, fakeFetch), undefined);
 });

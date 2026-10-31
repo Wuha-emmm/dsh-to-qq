@@ -350,3 +350,77 @@ export async function searchVideos(keyword, cookie, fetchImpl = fetch) {
       url: `https://www.bilibili.com/video/${item.bvid}`,
     }));
 }
+
+/**
+ * Read a video's subtitles (manual or the AI-generated track).
+ *
+ * `/x/player/wbi/v2` lists the tracks for a signed-in viewer; the track itself is
+ * a JSON file with `{ from, to, content }` rows, which is the cheapest way to know
+ * what a video actually says.
+ *
+ * @param {{ aid: number, cid: number, bvid?: string, cookie: string }} request Video identity.
+ * @param {typeof fetch} [fetchImpl] Fetch implementation.
+ * @returns {Promise<{ lan: string, lanDoc: string, lines: Array<{ from: number, to: number, text: string }>, text: string, chars: number } | undefined>} Transcript.
+ */
+export async function videoSubtitles(request, fetchImpl = fetch) {
+  const aid = Number(request.aid) || 0;
+  const cid = Number(request.cid) || 0;
+  if (aid <= 0 || cid <= 0) return undefined;
+  let key;
+  try {
+    ({ key } = await wbiMaterial(request.cookie, fetchImpl));
+  } catch {
+    key = '';
+  }
+  const params = { aid: String(aid), cid: String(cid), ...(request.bvid ? { bvid: request.bvid } : {}) };
+  const signed = key === '' ? params : signWbi(params, key);
+  const query = new URLSearchParams(signed).toString();
+  const playerUrl = key === ''
+    ? `https://api.bilibili.com/x/player/v2?${query}`
+    : `https://api.bilibili.com/x/player/wbi/v2?${query}`;
+  let payload;
+  try {
+    const response = await fetchImpl(playerUrl, {
+      headers: {
+        cookie: request.cookie,
+        'user-agent': USER_AGENT,
+        referer: `https://www.bilibili.com/video/${request.bvid ?? `av${aid}`}`,
+        accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+    payload = await response.json();
+  } catch {
+    return undefined;
+  }
+  if (Number(payload?.code) !== 0) return undefined;
+  const tracks = payload?.data?.subtitle?.subtitles;
+  if (!Array.isArray(tracks) || tracks.length === 0) return undefined;
+  const track = tracks.find(item => String(item?.subtitle_url ?? '') !== '') ?? tracks[0];
+  const rawUrl = String(track.subtitle_url ?? '');
+  if (rawUrl === '') return undefined;
+  const url = rawUrl.startsWith('//') ? `https:${rawUrl}` : rawUrl;
+  try {
+    const response = await fetchImpl(url, {
+      headers: { cookie: request.cookie, 'user-agent': USER_AGENT, referer: 'https://www.bilibili.com/' },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const body = await response.json();
+    const rows = Array.isArray(body?.body) ? body.body : [];
+    const lines = rows.map(row => ({
+      from: Number(row.from) || 0,
+      to: Number(row.to) || 0,
+      text: String(row.content ?? '').trim(),
+    })).filter(line => line.text !== '');
+    const text = lines.map(line => line.text).join('\n');
+    return {
+      lan: String(track.lan ?? ''),
+      lanDoc: String(track.lan_doc ?? ''),
+      lines,
+      text,
+      chars: text.length,
+    };
+  } catch {
+    return undefined;
+  }
+}

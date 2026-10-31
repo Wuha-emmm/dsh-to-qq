@@ -171,6 +171,7 @@ cookie 存在状态目录的 `accounts.json`（不写进 `config.json`，面板�
 |---|---|---|
 | `search` | `x/web-interface/wbi/search/type`（WBI 签名） | 顺带在登录浏览器打开搜索页和第一条结果，浏览器历史里能看到 |
 | `open` | DevTools `Target.createTarget` | 在你自己的登录窗口里打开页面 |
+| `subtitle` | `x/player/wbi/v2` → 字幕 JSON | **读视频内容最省的一条**：有字幕（含 AI 字幕）就能拿到逐句文本 |
 | `comment` | `x/v2/reply/add` + `csrf`（`bili_jct`） | 需要视频 aid；`mention` 传 uid 才会 @ 对人 |
 | `dynamic` | `x/dynamic/feed/create/dyn`（WBI + csrf） | 纯文字动态 |
 | `history` | `x/v2/history/report`（先取 cid） | 只上报，不保证进观看记录 |
@@ -179,6 +180,8 @@ cookie 存在状态目录的 `accounts.json`（不写进 `config.json`，面板�
 WBI 签名：从 `nav` 取 `wbi_img` 两个 key，按固定置换表混成 32 位 key，再把参数排序拼接后 `md5(query + key)` 得到 `w_rid`。
 
 @ 的真实规则：B站 只认**昵称完全匹配**，纯文本 `@呜哈` 会链到**同名用户**（实测确实链到了另一个叫「呜哈」的账号）。所以 `comment` 的 `mention` 参数要传 uid，工具先查 `x/space/wbi/acc/info` 拿到准确昵称再拼进正文，发完用评论的 `content.members` 核对指向的 mid。
+
+字幕实测（登录态下）：道歉视频 60 句 / 709 字，游戏视频 337 句 / 2492 字；都是 `ai-zh` AI 字幕，可能有错字。没有字幕的视频这条路直接断。
 
 实测：光是发评论（纯 API）不会打开页面，也不进任何记录；`x/v2/history` 一直是 0 条，即便在窗口里播放了 14 秒也没出现——最可能是账号设置里关掉了「记录我的浏览历史」，插件读不到那个开关。
 
