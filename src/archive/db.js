@@ -84,6 +84,9 @@ export async function openArchive(file) {
       duration_ms INTEGER NOT NULL,
       prompt_chars INTEGER NOT NULL,
       reply_chars INTEGER NOT NULL,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_tokens INTEGER NOT NULL DEFAULT 0,
       ok INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS turns_started ON turns (started_at);
@@ -95,6 +98,10 @@ export async function openArchive(file) {
   }
   if (!columns.includes('reasoning')) {
     db.exec('ALTER TABLE messages ADD COLUMN reasoning TEXT');
+  }
+  const turnColumns = db.prepare('PRAGMA table_info(turns)').all().map(column => column.name);
+  for (const column of ['input_tokens', 'output_tokens', 'cache_tokens']) {
+    if (!turnColumns.includes(column)) db.exec(`ALTER TABLE turns ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`);
   }
   if (!columns.includes('media_path')) {
     db.exec('ALTER TABLE messages ADD COLUMN media_path TEXT');
@@ -226,8 +233,9 @@ class Archive {
   insertTurn(turn) {
     try {
       this.db.prepare(`
-        INSERT INTO turns (scene, sender_id, tier, started_at, duration_ms, prompt_chars, reply_chars, ok)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO turns (scene, sender_id, tier, started_at, duration_ms, prompt_chars, reply_chars,
+                           input_tokens, output_tokens, cache_tokens, ok)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         turn.scene,
         turn.senderId,
@@ -236,6 +244,9 @@ class Archive {
         turn.durationMs,
         turn.promptChars,
         turn.replyChars,
+        Number(turn.inputTokens) || 0,
+        Number(turn.outputTokens) || 0,
+        Number(turn.cacheTokens) || 0,
         turn.ok ? 1 : 0,
       );
       return true;
@@ -268,11 +279,35 @@ class Archive {
    * @param {number} [limit] Maximum rows.
    * @returns {any[]} Turn rows.
    */
-  recentTurns(limit = 20) {
+  recentTurns(limit = 30) {
+    const capped = Math.min(500, Math.max(1, Number(limit) || 30));
     return this.db.prepare(`
-      SELECT scene, sender_id, tier, started_at, duration_ms, prompt_chars, reply_chars, ok
+      SELECT scene, sender_id, tier, started_at, duration_ms, prompt_chars, reply_chars,
+             input_tokens, output_tokens, cache_tokens, ok
       FROM turns ORDER BY started_at DESC LIMIT ?
-    `).all(Math.min(200, Math.max(1, limit)));
+    `).all(capped);
+  }
+
+  /**
+   * Token totals from a point in time.
+   *
+   * @param {number} sinceMs Epoch milliseconds.
+   * @returns {{ turns: number, input: number, output: number, cache: number }} Totals.
+   */
+  usageTotals(sinceMs = 0) {
+    const row = this.db.prepare(`
+      SELECT COUNT(*) AS turns,
+             COALESCE(SUM(input_tokens), 0) AS input,
+             COALESCE(SUM(output_tokens), 0) AS output,
+             COALESCE(SUM(cache_tokens), 0) AS cache
+      FROM turns WHERE ok = 1 AND started_at >= ?
+    `).get(Number(sinceMs) || 0);
+    return {
+      turns: Number(row?.turns) || 0,
+      input: Number(row?.input) || 0,
+      output: Number(row?.output) || 0,
+      cache: Number(row?.cache) || 0,
+    };
   }
 
   /**

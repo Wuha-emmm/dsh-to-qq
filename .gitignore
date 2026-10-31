@@ -29,3 +29,4 @@ coverage/
 
 # Local screenshots (never publish desktop captures)
 /shots/
+.backup-*/

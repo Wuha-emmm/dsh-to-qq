@@ -271,6 +271,8 @@ export class DshDriver {
     let sawAssistant = false;
     /** @type {{ kind: string, error?: { message: string } } | undefined} */
     let turnReason;
+    /** @type {any} Token usage reported by the last assistant message. */
+    let usage;
 
     /** Resolves when the turn ends, fails, or the stream closes. */
     let settle;
@@ -306,6 +308,7 @@ export class DshDriver {
 
           const base = promptSeq !== -1 ? promptSeq : ourTurnStart;
           if (type === 'assistant/message' && base !== -1 && seq > base) {
+            usage = event.data?.message?.usage ?? event.data?.usage ?? usage;
             for (const block of event.data?.message?.content ?? []) {
               if (block?.type === 'text' && typeof block.text === 'string') reply += block.text;
               if (block?.type === 'reasoning' && typeof block.text === 'string') reasoning += block.text;
@@ -388,7 +391,7 @@ export class DshDriver {
     const text = reply.trim();
     const failure = turnReason?.kind === 'error' ? turnReason.error?.message : undefined;
     if (text === '' && failure !== undefined) throw new Error(`agent failed: ${failure}`);
-    return { sessionId, text, reasoning: reasoning.trim(), sessionBound: true };
+    return { sessionId, text, reasoning: reasoning.trim(), sessionBound: true, usage };
   }
 }
 

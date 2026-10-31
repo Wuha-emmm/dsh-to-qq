@@ -59,6 +59,10 @@ export function defaults() {
       blockedWords: [],
     },
     models: {
+      /** ¥ per 1M tokens; all zero means "not configured" and the panel shows tokens only. */
+      inputPrice: 0,
+      outputPrice: 0,
+      cachePrice: 0,
       /** Permission preset applied to each QQ session; empty leaves the deployment default. */
       permissionPreset: 'danger-full-access',
       owner: { provider: '', model: '', effort: 'high' },
@@ -234,6 +238,9 @@ export function normalize(config) {
     'limits.overLimit': ['refuse', 'silent', 'queue'],
     'output.style': ['light', 'dark', 'bubble'],
     'models.permissionPreset': ['', 'auto', 'workspace-write', 'danger-full-access'],
+    'models.inputPrice': [0, 1000],
+    'models.outputPrice': [0, 1000],
+    'models.cachePrice': [0, 1000],
   };
   for (const [path, allowed] of Object.entries(enums)) {
     const [section, key] = path.split('.');

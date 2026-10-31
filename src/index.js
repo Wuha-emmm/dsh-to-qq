@@ -14,6 +14,7 @@ import { mergeConfig } from './config/defaults.js';
 import { mergeIncomingConfig } from './config/merge.js';
 import { readFile, rename, writeFile } from 'node:fs/promises';
 import { pickRoute } from './llm/route.js';
+import { estimateCost, cacheRate } from './llm/cost.js';
 import { panelAccess } from './web/guard.js';
 import { pruneMedia } from './media/prune.js';
 import { detectMediaType } from './media/inbound.js';
@@ -38,7 +39,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.56.3';
+const VERSION = '0.57.0';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -754,6 +755,46 @@ export function apply(ctx) {
         return;
       }
 
+      if (url.pathname === '/dsh-to-qq/api/usage') {
+        const prices = {
+          input: Number(store.get().models.inputPrice) || 0,
+          output: Number(store.get().models.outputPrice) || 0,
+          cache: Number(store.get().models.cachePrice) || 0,
+        };
+        const rows = bridge.archive?.recentTurns?.(30) ?? [];
+        const recent = rows.map(row => {
+          const estimate = estimateCost(
+            { inputTokens: row.input_tokens, outputTokens: row.output_tokens, cacheReadTokens: row.cache_tokens },
+            prices,
+          );
+          return {
+            scene: row.scene,
+            tier: row.tier,
+            startedAt: row.started_at,
+            durationMs: row.duration_ms,
+            promptChars: row.prompt_chars,
+            replyChars: row.reply_chars,
+            input: estimate.input,
+            output: estimate.output,
+            cache: estimate.cache,
+            cacheRate: cacheRate(estimate),
+            cost: estimate.cost,
+          };
+        });
+        const midnight = new Date();
+        midnight.setHours(0, 0, 0, 0);
+        const totals = bridge.archive?.usageTotals?.(midnight.getTime()) ?? { turns: 0, input: 0, output: 0, cache: 0 };
+        send(200, {
+          prices,
+          today: {
+            ...totals,
+            cost: estimateCost({ inputTokens: totals.input, outputTokens: totals.output, cacheReadTokens: totals.cache }, prices).cost,
+            cacheRate: cacheRate(totals),
+          },
+          recent,
+        });
+        return;
+      }
       if (url.pathname === '/dsh-to-qq/api/sessions') {
         try {
           if (req.method === 'POST') {
@@ -857,6 +898,7 @@ export function apply(ctx) {
       { kind: 'exact', path: '/dsh-to-qq/api/memory' },
       { kind: 'exact', path: '/dsh-to-qq/api/impressions' },
       { kind: 'exact', path: '/dsh-to-qq/api/sessions' },
+      { kind: 'exact', path: '/dsh-to-qq/api/usage' },
       { kind: 'exact', path: '/dsh-to-qq/api/stickers' },
       { kind: 'exact', path: '/dsh-to-qq/api/stickers/preview' },
       { kind: 'exact', path: '/dsh-to-qq/api/stickers/update' },
@@ -997,6 +1039,11 @@ export function apply(ctx) {
         `events seen: ${eventTypes.size === 0 ? '(none yet)' : [...eventTypes].join(', ')}`,
         bridge.lastToolCall === '' ? 'tool calls: none yet' : `last tool call: ${bridge.lastToolCall}`,
         `models: preset ${config.models.permissionPreset || "（跟随 DSH）"} / owner effort ${config.models.owner.effort || "（默认）"}`,
+        (() => {
+          const last = bridge.archive?.recentTurns?.(1)?.[0];
+          if (last === undefined) return 'usage: 还没有记录';
+          return `usage: 上一轮 输入 ${last.input_tokens} / 输出 ${last.output_tokens} / 缓存 ${last.cache_tokens}`;
+        })(),
         `impressions: filled ${bridge.impressionStats.backfillFilled} / scanned ${bridge.impressionStats.scanned} / failed ${bridge.impressionStats.failed} / retried ${bridge.impressionStats.retried ?? 0} / last ${bridge.impressionStats.lastAt === 0 ? 'never' : new Date(bridge.impressionStats.lastAt).toLocaleString('zh-CN', { hour12: false })}${bridge.impressionStats.lastError === '' ? '' : ` (error: ${bridge.impressionStats.lastError})`}`,
         `stickers: ${bridge.stickers?.size ?? 0} known / ${bridge.stickers?.all().filter(item => item.desc !== '').length ?? 0} described / synced ${bridge.stickerStats.syncedAt === 0 ? 'never' : new Date(bridge.stickerStats.syncedAt).toLocaleString('zh-CN', { hour12: false })}`,
         pending.length === 0 ? 'ready' : `pending: ${pending.join('; ')}`,
@@ -1010,6 +1057,7 @@ export function apply(ctx) {
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
 }
+
 
 
 

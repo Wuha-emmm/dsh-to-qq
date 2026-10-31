@@ -1091,6 +1091,8 @@ export class Bridge {
     this.busy.add(message.scene);
     const startedAt = Date.now();
     let replyChars = 0;
+    /** Token usage of the last assistant message, for the ledger. */
+    let turnUsage = null;
     let turnOk = false;
     try {
       if (config.output.sendProcessingHint) await this.sendText(message, '收到，正在处理…');
@@ -1266,6 +1268,7 @@ export class Bridge {
           void this.#titleSession(sessionId, message);
         },
       });
+      turnUsage = result.usage ?? null;
       // A card is the answer: drop the "已发送" text that usually follows it.
       const cardSent = this.cardsSent > cardsBefore;
       if (shouldStaySilent(result.text, { cardSent })) {
@@ -1310,6 +1313,9 @@ export class Bridge {
         durationMs: Date.now() - startedAt,
         promptChars: message.text.length,
         replyChars,
+        inputTokens: Number(turnUsage?.inputTokens) || 0,
+        outputTokens: Number(turnUsage?.outputTokens) || 0,
+        cacheTokens: Number(turnUsage?.cacheReadTokens) || 0,
         ok: turnOk,
       });
       release();

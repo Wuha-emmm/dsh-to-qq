@@ -630,6 +630,7 @@ window.__ModuleLoader__.load({
       ...SETTINGS_GROUPS.map(group => ({ id: group.title, title: group.title, group })),
       { id: '表情', title: '表情', custom: 'stickers' },
       { id: '模型', title: '模型', custom: 'models' },
+      { id: '用量', title: '用量', custom: 'usage' },
       { id: '档案', title: '档案', custom: 'archive' },
     ];
 
@@ -840,6 +841,50 @@ window.__ModuleLoader__.load({
             h(Select, { value: route?.model ?? '', options: modelOptions, disabled: models.length === 0, onChange: next => onChange({ ...route, model: next }) })),
           efforts.length === 0 ? null : h('div', { style: { flex: '1 1 25%', minWidth: 96 } },
             h(Select, { value: route?.effort ?? '', options: effortOptions, onChange: next => onChange({ ...route, effort: next }) }))));
+    };
+
+    /** Per-turn token usage and estimated cost. */
+    const UsageBox = () => {
+      const [data, setData] = React.useState(null);
+      const [status, setStatus] = React.useState('');
+      const load = () => getJson('/dsh-to-qq/api/usage')
+        .then(setData)
+        .catch(reason => setStatus(`读取失败：${reason?.message ?? reason}`));
+      React.useEffect(() => { void load(); }, []);
+      const money = value => (value === null || value === undefined ? '未配置价格' : `¥${value.toFixed(4)}`);
+      const pct = value => `${Math.round((value ?? 0) * 100)}%`;
+      const today = data?.today;
+      return h('div', { style: { ...UI.card, marginBottom: 12 } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0' } },
+          h('div', { style: { flex: 1, minWidth: 0 } },
+            h('div', { style: { fontSize: 12.5 } }, '今日用量'),
+            h('div', { style: UI.muted },
+              today === undefined
+                ? '读取中…'
+                : `${today.turns} 轮 · 输入 ${today.input} / 输出 ${today.output} / 缓存命中 ${today.cache}（${pct(today.cacheRate)}） · ${money(today.cost)}`)),
+          h('button', { type: 'button', onClick: load, style: UI.ghost }, '刷新')),
+        h('div', { style: { ...UI.muted, margin: '6px 0 10px' } },
+          data?.prices !== undefined && data.prices.input === 0 && data.prices.output === 0 && data.prices.cache === 0
+            ? '未配置单价，只显示 token。去「模型」页签填 ¥/百万 token。'
+            : ''),
+        data?.recent === undefined || data.recent.length === 0
+          ? h('div', { style: UI.muted }, '还没有记录。下一轮对话后这里会出现数据。')
+          : h('div', { style: { fontSize: 11.5, lineHeight: 1.9 } },
+            h('div', { style: { ...UI.muted, display: 'grid', gridTemplateColumns: '1.4fr .8fr .7fr .7fr .6fr .6fr', gap: 8 } },
+              h('span', { key: 'a' }, '场景'), h('span', { key: 'b' }, '时间'),
+              h('span', { key: 'c' }, '输入'), h('span', { key: 'd' }, '输出'),
+              h('span', { key: 'e' }, '缓存'), h('span', { key: 'f' }, '费用')),
+            data.recent.slice(0, 15).map(row => h('div', {
+              key: `${row.scene}-${row.startedAt}`,
+              style: { display: 'grid', gridTemplateColumns: '1.4fr .8fr .7fr .7fr .6fr .6fr', gap: 8 },
+            },
+              h('span', { key: 'a' }, row.scene),
+              h('span', { key: 'b' }, new Date(row.startedAt).toLocaleTimeString('zh-CN', { hour12: false })),
+              h('span', { key: 'c' }, String(row.input)),
+              h('span', { key: 'd' }, String(row.output)),
+              h('span', { key: 'e' }, pct(row.cacheRate)),
+              h('span', { key: 'f' }, money(row.cost))))),
+        status === '' ? null : h('div', { style: { ...UI.muted, marginTop: 8 } }, status));
     };
 
     /** Cleanup of stale bridge sessions, with an explicit preview step. */
@@ -1304,6 +1349,8 @@ const StickerBoard = () => {
         ].filter(Boolean)
         : active.custom === 'stickers'
           ? [h(StickerBoard, { key: 'stickers' })]
+        : active.custom === 'usage'
+          ? [h(UsageBox, { key: 'usage' })]
         : active.custom === 'models'
           ? [
             h('div', { key: 'card', style: UI.card },
@@ -1316,6 +1363,10 @@ const StickerBoard = () => {
                 catalog,
                 onChange: next => setConfig(current => setPath(current, `models.${tier.id}`, next)),
               }))),
+              h('div', { key: 'prices', style: { marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' } },
+                fieldRow({ path: 'models.inputPrice', label: '输入 ¥/M', type: 'number' }),
+                fieldRow({ path: 'models.outputPrice', label: '输出 ¥/M', type: 'number' }),
+                fieldRow({ path: 'models.cachePrice', label: '缓存 ¥/M', type: 'number' })),
               h('div', { key: 'permission', style: { marginTop: 6 } },
                 fieldRow({
                   path: 'models.permissionPreset',
