@@ -38,7 +38,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.53.0';
+const VERSION = '0.53.1';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -373,6 +373,7 @@ export function apply(ctx) {
   ctx.effect(() => {
     void memory.load().catch(error => log(`memory load failed: ${error.message}`));
   void stickers.load().catch(error => log(`sticker load failed: ${error.message}`));
+  void bridge.loadRebuildState().catch(error => log(`rebuild marks load failed: ${error.message}`));
   void readFile(join(stateDir, 'quota.json'), 'utf8').then(text => {
     if (bridge.quota.restore(JSON.parse(text))) log('quota counters restored');
   }).catch(() => {});
@@ -954,6 +955,7 @@ export function apply(ctx) {
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
 }
+
 
 
 

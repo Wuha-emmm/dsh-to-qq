@@ -1,3 +1,4 @@
+
 /**
  * Bridge runtime.
  *
@@ -11,7 +12,7 @@ import { normalizeEvent, chunkText, flattenSegments } from './events.js';
 import { admit, blockedWord, tierOf } from '../policy/tiers.js';
 import { Quota, Semaphore } from '../policy/quota.js';
 import { SceneBuffer, renderContext } from '../context/buffer.js';
-import { InjectionTracker } from '../context/injection.js';
+import { InjectionTracker, entrySignature } from '../context/injection.js';
 import { formatRecap } from '../context/recap.js';
 import { renderCard } from '../memory/store.js';
 import { renderTextImageBase64 } from '../render/text-image.js';
@@ -31,7 +32,7 @@ import { summarizeDigest, formatDigest, startOfBeijingDay, DIGEST_ROW_LIMIT } fr
 import { dueForAutoNote, autoNotePrompt } from '../memory/autonote.js';
 import { summarizeImpressions, backfillImpressions } from './impression-run.js';
 import { shouldStaySilent } from './reply.js';
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -366,10 +367,12 @@ export class Bridge {
     /** Bot account; 0 until the first event (or connection.botUin) pins it. */
     this.selfId = 0;
     /** Recap text waiting for the next message of a rebuilt scene. */
-    this.pendingSeeds = new Map();
+    /** Scenes rebuilt (not /新建): the next message carries a recap from the archive. */
+    this.rebuildMarks = new Map();
     /** Per-scene injection state: which fixed blocks the session already has. */
     this.injections = new Map();
-    /** Sessions already renamed in this process. */
+    /** Directory for rebuilds.json; empty disables persistence. */
+    this.stateDir = options.stateDir ?? '';
     this.titledSessions = new Set();
     /** group id -> display name, so a title costs one call. */
     this.groupNames = new Map();
@@ -1048,13 +1051,23 @@ export class Bridge {
       const savedPaths = [];
       const quoted = await this.#resolveQuote(message);
       const quotedText = quoted?.text;
+      // A rebuilt scene (marked earlier, possibly before a restart) carries its
+      // tail exactly once. The same rows were just backfilled into the buffer,
+      // so mark them seen to keep the context window free of duplicates.
+      let seed;
+      const mark = this.rebuildMarks.get(message.scene);
+      if (mark !== undefined) {
+        this.rebuildMarks.delete(message.scene);
+        void this.#saveRebuildMarks().catch(() => {});
+        const rows = this.archive?.search?.({ scene: message.scene, limit: 14 }) ?? [];
+        for (const row of rows) {
+          injection.seen.add(entrySignature({ time: Number(row.time_unix) || 0, senderId: Number(row.sender_id) || 0, text: row.text ?? '' }));
+        }
+        seed = formatRecap(rows);
+      }
       const promptBase = tier === 'owner'
         ? this.#privatePrompt(message, config, card, quotedText)
         : this.#groupPrompt(message, config, card, quotedText, injection);
-      // A rebuilt scene carries its tail exactly once, with the next message.
-      const seed = this.pendingSeeds.get(message.scene);
-      if (seed !== undefined) this.pendingSeeds.delete(message.scene);
-      const promptText = seed === undefined ? promptBase : `${seed}\n\n${promptBase}`;
       const stickers = imageSegments(message.segments).filter(looksLikeSticker).length;
       // Voice: QQ's own ASR first, then a local speech provider, then a command.
       const voices = voiceSegments(message.segments);
@@ -1151,14 +1164,15 @@ export class Bridge {
       const nudge = dueForAutoNote(turnNumber, config.memory.autoNoteEvery) ? autoNotePrompt() : '';
       // Sticker catalog: only when the tool is available for this tier.
       const stickerNote = this.stickerBlock(message.scene, injection);
-      const text = `${promptText}${imageNote}${voiceNote}${fileNote}${forwardNote}${stickerNote}${nudge}`;
+      const bodyText = `${promptBase}${imageNote}${voiceNote}${fileNote}${forwardNote}${stickerNote}${nudge}`;
+      const text = seed === undefined ? bodyText : `${seed}\n\n${bodyText}`;
       this.contextStats = { chars: text.length, ...injection.stats };
       if (injection.skipped > 0) {
         this.log(`context ${message.scene}: sent ${text.length} chars, skipped ${injection.skipped}`);
       }
       // The body was checked at admission; the quote, forward, transcript and
       // file names only exist now, so scan the assembled prompt as well.
-      const hit = blockedWord(text, config);
+      const hit = blockedWord(bodyText, config);
       if (hit !== '') {
         this.counters.ignored += 1;
         this.log(`blocked word in merged content for ${message.scene}: ${hit}`);
@@ -1270,8 +1284,11 @@ export class Bridge {
     const recap = formatRecap(rows);
     await this.map?.remove?.(scene);
     this.injections.delete(scene);
-    if (recap !== '') this.pendingSeeds.set(scene, recap);
-    this.log(`rebuilt ${scene} (${options.reason ?? 'manual'}): kept ${recap.length} chars`);
+    if (recap !== '') {
+      this.rebuildMarks.set(scene, { at: Date.now() });
+      await this.#saveRebuildMarks();
+    }
+    this.log(`rebuilt ${scene} (${options.reason ?? 'manual'}): will carry ${recap.length} chars`);
     return { recapChars: recap.length, messages: rows.length };
   }
 
@@ -1307,6 +1324,46 @@ export class Bridge {
     return rebuilt;
   }
 
+  /**
+   * Load rebuild marks that survived a restart.
+   *
+   * @returns {Promise<void>} Resolves after the read.
+   */
+  /**
+   * Load the rebuild marks saved by a previous run.
+   *
+   * @returns {Promise<void>} Resolves after the read.
+   */
+  async loadRebuildState() {
+    await this.#loadRebuildMarks();
+  }
+
+  async #loadRebuildMarks() {
+    if (this.stateDir === '') return;
+    try {
+      const parsed = JSON.parse(await readFile(join(this.stateDir, 'rebuilds.json'), 'utf8'));
+      for (const [scene, mark] of Object.entries(parsed ?? {})) {
+        if (typeof mark?.at === 'number') this.rebuildMarks.set(scene, { at: mark.at });
+      }
+    } catch {
+      // Missing or unreadable simply starts empty.
+    }
+  }
+
+  /**
+   * Persist rebuild marks.
+   *
+   * @returns {Promise<void>} Resolves after the write.
+   */
+  async #saveRebuildMarks() {
+    if (this.stateDir === '') return;
+    const body = JSON.stringify(Object.fromEntries(this.rebuildMarks), null, 2);
+    const target = join(this.stateDir, 'rebuilds.json');
+    await mkdir(this.stateDir, { recursive: true });
+    const temporary = `${target}.tmp-${process.pid}`;
+    await writeFile(temporary, body, 'utf8');
+    await rename(temporary, target);
+  }
   /**
    * Injection state for one scene; a new session starts from scratch.
    *
