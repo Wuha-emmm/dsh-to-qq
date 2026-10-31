@@ -9,6 +9,8 @@
 
 import { OneBotClient } from '../transport/onebot.js';
 import { normalizeEvent, chunkText, flattenSegments } from './events.js';
+import { normalizeRequestEvent, describeRequest } from './requests.js';
+import { buildReplySegments, memberNames } from './mentions.js';
 import { admit, blockedWord, tierOf } from '../policy/tiers.js';
 import { Quota, Semaphore } from '../policy/quota.js';
 import { SceneBuffer, renderContext } from '../context/buffer.js';
@@ -384,6 +386,11 @@ export class Bridge {
     this.continuedSessions = new Set();
     /** How often DSH condensed a session and when; shown by qq_status. */
     this.compactionStats = { count: 0, lastAt: 0 };
+    /** Group id -> { at, members } for @mentions in replies. */
+    this.memberCache = new Map();
+    /** Pending friend/group requests waiting for an administrator's answer. */
+    this.pendingRequests = new Map();
+    this.requestSeq = 0;
     /** The bot's QQ friends, so a non-admin DM is not a stranger. */
     this.friends = new Set();
     this.friendsSyncedAt = 0;
@@ -731,6 +738,11 @@ export class Bridge {
         await this.sendText(message, `已切到：${target.title ?? target.id}`);
         return;
       }
+      case 'approve':
+      case 'reject': {
+        await this.#answerJoinRequest(message, command.name === 'approve', command.arg);
+        return;
+      }
       case 'rebuild': {
         const outcome = await this.rebuildScene(scene, { reason: 'command' });
         this.sessionChoices.delete(scene);
@@ -939,6 +951,11 @@ export class Bridge {
   async handle(event) {
     const config = this.store.get();
     this.counters.events += 1;
+    const joinRequest = normalizeRequestEvent(event);
+    if (joinRequest !== undefined) {
+      await this.#handleJoinRequest(joinRequest, config);
+      return;
+    }
     const message = normalizeEvent(event);
     if (message === undefined) return;
     // Pin the bot account: an event claiming another self_id cannot be trusted,
@@ -1027,6 +1044,14 @@ export class Bridge {
     // `/yes` approves the tool the model just tried to run, then the admin retries.
     // `/yes` approves the pending call; a bare yes/好 counts too while one is
     // pending, because people answer in chat rather than in commands.
+    if (tier === 'owner' && this.pendingRequests.size > 0) {
+      const bare = /^(同意|批准|通过|拒绝|驳回)(?:\s*(\d+))?$/.exec(message.text.trim());
+      if (bare !== null && parseCommand(message.text) === undefined) {
+        await this.#answerJoinRequest(message, bare[1] === '拒绝' || bare[1] === '驳回', bare[2] ?? '');
+        return;
+      }
+    }
+
     if (tier === 'owner') {
       const answer = message.text.trim();
       const broad = /^\/yes!$/i.test(answer);
@@ -1578,6 +1603,94 @@ export class Bridge {
     await rename(temporary, target);
   }
   /**
+   * Forward one friend/group request to the administrators and remember it.
+   *
+   * The bridge never approves by itself: a request is applied only after an
+   * administrator answers, so a stranger cannot talk their way into the account.
+   *
+   * @param {ReturnType<typeof normalizeRequestEvent>} request Decoded request.
+   * @param {any} config Live configuration.
+   * @returns {Promise<void>} Resolves after the notification.
+   */
+  async #handleJoinRequest(request, config) {
+    if (config.access.forwardRequests === false) {
+      this.log(`join request ignored (forwarding off): ${request.kind} ${request.userId}`);
+      return;
+    }
+    const ttlMs = Math.max(1, Number(config.access.requestTtlMin) || 30) * 60_000;
+    for (const [token, entry] of this.pendingRequests) {
+      if (Date.now() - entry.at > ttlMs) this.pendingRequests.delete(token);
+    }
+    this.requestSeq = (this.requestSeq ?? 0) + 1;
+    const token = this.requestSeq;
+    this.pendingRequests.set(token, { request, at: Date.now() });
+    const text = describeRequest(request, token);
+    const admins = Array.isArray(config.access.admins) ? config.access.admins : [];
+    if (admins.length === 0) {
+      this.log(`join request ${request.kind} from ${request.userId} has no administrator to ask`);
+      return;
+    }
+    let delivered = 0;
+    for (const admin of admins) {
+      try {
+        await this.client?.call(
+          'send_private_msg',
+          { user_id: Number(admin.qq), message: [{ type: 'text', text }] },
+          { timeoutMs: 10_000 },
+        );
+        delivered += 1;
+      } catch (error) {
+        this.log(`request notice to ${admin.qq} failed: ${String(error?.message ?? error).slice(0, 100)}`);
+      }
+    }
+    this.log(`join request ${request.kind} from ${request.userId} forwarded to ${delivered} admin(s) as #${token}`);
+  }
+
+  /**
+   * Apply an administrator's approve/reject answer.
+   *
+   * @param {import('./events.js').QQMessage} message Administrator message.
+   * @param {boolean} approve True to approve.
+   * @param {string} arg Optional request token.
+   * @returns {Promise<void>} Resolves after the answer.
+   */
+  async #answerJoinRequest(message, approve, arg) {
+    const config = this.store.get();
+    const ttlMs = Math.max(1, Number(config.access.requestTtlMin) || 30) * 60_000;
+    for (const [token, entry] of this.pendingRequests) {
+      if (Date.now() - entry.at > ttlMs) this.pendingRequests.delete(token);
+    }
+    const asked = Number.parseInt(String(arg ?? '').trim(), 10);
+    let token = Number.isInteger(asked) ? asked : 0;
+    if (token === 0 && this.pendingRequests.size === 1) token = [...this.pendingRequests.keys()][0];
+    const entry = this.pendingRequests.get(token);
+    if (entry === undefined) {
+      await this.sendText(message, '没有待处理的申请（编号不对，或已超过 30 分钟）。');
+      return;
+    }
+    const { request } = entry;
+    const action = request.kind === 'friend'
+      ? 'set_friend_add_request'
+      : 'set_group_add_request';
+    const params = request.kind === 'friend'
+      ? { flag: request.flag, approve }
+      : {
+        flag: request.flag,
+        sub_type: request.kind === 'group-invite' ? 'invite' : 'add',
+        approve,
+      };
+    try {
+      await this.client?.call(action, params, { timeoutMs: 10_000 });
+      this.pendingRequests.delete(token);
+      const who = request.nickname === '' ? String(request.userId) : request.nickname;
+      await this.sendText(message, `已${approve ? '同意' : '拒绝'} #${token} ${who}`);
+      this.log(`join request #${token} ${approve ? 'approved' : 'rejected'}`);
+    } catch (error) {
+      await this.sendText(message, `操作失败：${String(error?.message ?? error).slice(0, 140)}`);
+    }
+  }
+
+  /**
    * Refresh the QQ friend list at most every 30 minutes.
    *
    * A friend (non-admin DM) is answered as a member; anyone who never added the
@@ -1773,7 +1886,7 @@ export class Bridge {
     // other members said. Use it to understand the conversation, not to report it.
     const privacy = config.conversation.groupPrivacy === false
       ? ''
-      : injection.fixed('rules', '【群聊规则】上下文里其他成员的消息只用于理解你们在聊什么，不要复述、总结、转述或引用其中任何一句；被问到“别人说了什么”时，只回答你自己看到的本轮内容。');
+      : injection.fixed('rules', '【群聊规则】上下文里其他成员的消息只用于理解你们在聊什么，不要复述、总结、转述或引用其中任何一句；被问到“别人说了什么”时，只回答你自己看到的本轮内容。回复里直接写 @名字 就会真的 @ 到对方（桥会把它转成真正的 @ 段），不要只写名字。');
     const ask = `【当前提问】${message.senderName}(${message.senderId}): ${message.text === '' ? '（非文本消息）' : message.text}`;
     const parts = [card, block, privacy, ask].filter(part => part !== '');
     return parts.join('\n\n');
@@ -1818,12 +1931,48 @@ export class Bridge {
    * @param {{ record?: boolean }} [options] Set `record: false` when the caller archives the whole reply itself.
    * @returns {Promise<void>} Resolves after the action returns.
    */
+  /**
+   * Names the bridge can turn into a real @mention for this group.
+   *
+   * Merges the group member list (refreshed every ten minutes) with the names
+   * seen in the recent buffer, so a card name still resolves.
+   *
+   * @param {import('./events.js').QQMessage} message Triggering message.
+   * @returns {Promise<Map<string, number>>} Display name -> QQ number.
+   */
+  async #membersFor(message) {
+    if (message.kind !== 'group') return new Map();
+    const scene = message.scene;
+    const cached = this.memberCache.get(scene);
+    const fresh = cached !== undefined && Date.now() - cached.at < 10 * 60_000;
+    let members = fresh ? cached.members : new Map();
+    if (!fresh && this.client !== undefined) {
+      try {
+        const rows = await this.client.call('get_group_member_list', { group_id: message.groupId }, { timeoutMs: 8000 });
+        const listed = memberNames(Array.isArray(rows) ? rows : (rows?.data ?? []));
+        for (const [name, qq] of listed) members.set(name, qq);
+        this.memberCache.set(scene, { at: Date.now(), members });
+      } catch (error) {
+        this.log(`group member list failed: ${String(error?.message ?? error).slice(0, 100)}`);
+      }
+    }
+    for (const entry of this.buffer.recent(scene, 99)) {
+      if (typeof entry.senderName === 'string' && entry.senderName !== '' && entry.senderId > 0) {
+        members.set(entry.senderName, Number(entry.senderId));
+      }
+    }
+    return members;
+  }
+
   async sendText(message, text, options = {}) {
     if (this.client === undefined) return;
     const action = message.kind === 'dm' ? 'send_private_msg' : 'send_group_msg';
+    const segments = message.kind === 'dm'
+      ? [{ type: 'text', data: { text } }]
+      : buildReplySegments(text, await this.#membersFor(message));
     const params = message.kind === 'dm'
-      ? { user_id: message.peerId, message: [{ type: 'text', data: { text } }] }
-      : { group_id: message.groupId, message: [{ type: 'text', data: { text } }] };
+      ? { user_id: message.peerId, message: segments }
+      : { group_id: message.groupId, message: segments };
     try {
       await this.client.call(action, params, { timeoutMs: 10_000 });
       if (options.record !== false) this.recordOutbound(message, text);

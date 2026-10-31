@@ -30,3 +30,8 @@ coverage/
 # Local screenshots (never publish desktop captures)
 /shots/
 .backup-*/
+
+# Automation screenshots (never publish desktop captures)
+/shot-*.png
+/crop-*.png
+/names-row*.png

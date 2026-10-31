@@ -1,7 +1,6 @@
 {
   "name": "dsh-to-qq",
-  "version": "0.62.0",
-
+  "version": "0.65.0",
   "description": "QQ <-> DeepSeek Harness bridge: chat with your local DSH from a QQ account through SnowLuma/OneBot",
   "type": "module",
   "main": "src/index.js",
@@ -12,24 +11,33 @@
     "./icon": "./icon.svg"
   },
   "files": [
-    "src",
+    "CHANGELOG.md",
+    "LICENSE",
+    "NOTICE.md",
+    "README.md",
+    "SECURITY.md",
     "client",
     "cordis.patch.yml",
-    "locale/*.json",
-    "icon.svg",
-    "README.md",
-    "docs/install.md",
-    "docs/deploy.md",
-    "docs/configuration.md",
-    "docs/troubleshooting.md",
-    "docs/stickers.md",
     "docs/architecture.md",
+    "docs/audit.md",
+    "docs/configuration.md",
+    "docs/deploy.md",
+    "docs/install.md",
     "docs/permission-model.md",
-    "NOTICE.md",
-    "LICENSE"
+    "docs/roadmap.md",
+    "docs/settings-spec.md",
+    "docs/snowluma-api.md",
+    "docs/snowluma.md",
+    "docs/stickers.md",
+    "docs/troubleshooting.md",
+    "icon.svg",
+    "locale/*.json",
+    "src"
   ],
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
       "immediately": true
@@ -57,39 +65,3 @@
   ],
   "license": "MIT"
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -52,6 +52,10 @@ export function defaults() {
       strangerPolicy: 'ignore',
       /** Treat the bot's QQ friends (non-admin DMs) as members instead of strangers. */
       friendsAsMember: true,
+      /** Forward friend/group requests to the administrators for an answer. */
+      forwardRequests: true,
+      /** How long a forwarded request stays answerable, in minutes. */
+      requestTtlMin: 30,
       /** whitelist | blacklist | all */
       groupMode: 'whitelist',
       /** @type {number[]} */
@@ -218,6 +222,7 @@ export const RANGES = {
   'safety.confirmTtlMs': [10_000, 600_000],
   'models.inputPrice': [0, 1000],
   'models.outputPrice': [0, 1000],
+  'access.requestTtlMin': [1, 1440],
   'models.cachePrice': [0, 1000],
   'models.searchPrice': [0, 100],
   'models.fetchPrice': [0, 100],

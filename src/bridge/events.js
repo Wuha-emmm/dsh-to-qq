@@ -5,6 +5,9 @@
  * record, so policy, context, and archive code never touch wire shapes.
  */
 
+import { describeCard } from './cards.js';
+
+
 /** Segment type to placeholder used when flattening a message into text. */
 const SEGMENT_LABELS = {
   image: '[图片]',
@@ -70,6 +73,12 @@ export function flattenSegments(segments, selfId) {
     }
     if (segment.type === 'reply') {
       if (data.id !== undefined && data.id !== null) replyTo = String(data.id);
+      continue;
+    }
+    // A shared post or mini-app is a card: read its headline instead of a bare placeholder.
+    if (segment.type === 'json' || segment.type === 'xml') {
+      const card = describeCard(segment);
+      text += card === '' ? SEGMENT_LABELS[segment.type] : ` ${card} `;
       continue;
     }
     text += SEGMENT_LABELS[segment.type] ?? `[${segment.type}]`;
