@@ -67,6 +67,8 @@ export class Approvals {
     this.pending = new Map();
     /** @type {Map<string, { tool: string, signature: string, until: number }>} */
     this.granted = new Map();
+    /** @type {Map<string, { tool: string, until: number }>} Override that covers any arguments. */
+    this.toolGrants = new Map();
   }
 
   /**
@@ -112,6 +114,11 @@ export class Approvals {
    * @returns {boolean} True when a fresh grant covers this call.
    */
   allowed(scene, tool, args, now = Date.now()) {
+    const broad = this.toolGrants.get(scene);
+    if (broad !== undefined) {
+      if (now > broad.until) this.toolGrants.delete(scene);
+      else if (broad.tool === tool) return true;
+    }
     const granted = this.granted.get(scene);
     if (granted === undefined) return false;
     if (now > granted.until) {
@@ -120,6 +127,28 @@ export class Approvals {
     }
     if (granted.tool !== tool) return false;
     return granted.signature === callSignature(args);
+  }
+
+  /**
+   * Approve every call of one tool for a short window (the `/yes!` shortcut).
+   *
+   * @param {string} scene Scene key.
+   * @param {string} tool Tool name.
+   * @param {number} [ttlMs] How long the override lasts.
+   * @returns {{ tool: string, until: number }} The override.
+   */
+  grantTool(scene, tool, ttlMs = 5 * 60_000) {
+    const until = Date.now() + Math.max(10_000, Number(ttlMs) || 0);
+    this.toolGrants.set(scene, { tool, until });
+    this.pending.delete(scene);
+    return { tool, until };
+  }
+
+  /** @param {string} scene Scene key. @returns {void} */
+  drop(scene) {
+    this.pending.delete(scene);
+    this.granted.delete(scene);
+    this.toolGrants.delete(scene);
   }
 
   /**
@@ -145,7 +174,22 @@ export class Approvals {
  * @returns {string} At most 80 characters.
  */
 function previewOf(args) {
+  const parsed = typeof args === 'string' ? safeParse(args) : args;
+  if (parsed !== null && typeof parsed === 'object' && typeof parsed.command === 'string') {
+    const command = parsed.command.replace(/\s+/g, ' ').trim();
+    return command.length > 60 ? `${command.slice(0, 57)}…` : command;
+  }
   const signature = callSignature(args);
   if (signature === '') return '(无参数)';
-  return signature.length > 80 ? `${signature.slice(0, 77)}…` : signature;
+  return signature.length > 60 ? `${signature.slice(0, 57)}…` : signature;
+}
+
+/**
+ * Parse a JSON string without throwing.
+ *
+ * @param {string} text Raw text.
+ * @returns {any} Parsed value, or null.
+ */
+function safeParse(text) {
+  try { return JSON.parse(text); } catch { return null; }
 }

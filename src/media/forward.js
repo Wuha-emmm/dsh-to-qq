@@ -135,6 +135,25 @@ async function expandNodes(client, payload, state, log) {
     }
     const depthLeft = state.depth < MAX_DEPTH && client !== undefined;
 
+    // Images inside a forward become real pictures later; collect their
+    // segments here so the caller can download them like any other image.
+    if (Array.isArray(node?.message)) {
+      for (const segment of node.message) {
+        if (segment?.type !== 'image') continue;
+        if (typeof segment.data?.url !== 'string' && typeof segment.data?.file === 'string' && client !== undefined) {
+          try {
+            const info = await client.call('get_image', { file: segment.data.file }, { timeoutMs: 8000 });
+            const url = info?.url ?? info?.data?.url ?? info?.file;
+            if (typeof url === 'string' && url !== '') segment.data = { ...segment.data, url };
+          } catch {
+            // keep the placeholder text
+          }
+        }
+        if (typeof segment?.data?.url !== 'string' || segment.data.url === '') continue;
+        if (state.images.length >= MAX_IMAGES) break;
+        state.images.push({ type: 'image', data: segment.data });
+      }
+
     // A nested forward inside this node: expand it one level down.
     const nested = Array.isArray(node?.message)
       ? node.message.filter(segment => segment?.type === 'forward' && typeof segment?.data?.id === 'string')
@@ -165,15 +184,6 @@ async function expandNodes(client, payload, state, log) {
       continue;
     }
 
-    // Images inside a forward become real pictures later; collect their
-    // segments here so the caller can download them like any other image.
-    if (Array.isArray(node?.message)) {
-      for (const segment of node.message) {
-        if (segment?.type !== 'image') continue;
-        if (typeof segment?.data?.url !== 'string' || segment.data.url === '') continue;
-        if (state.images.length >= MAX_IMAGES) break;
-        state.images.push({ type: 'image', data: segment.data });
-      }
     }
 
     const text = nodeText(node).replace(/\s+/g, ' ').trim();

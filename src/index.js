@@ -38,7 +38,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.53.2';
+const VERSION = '0.54.0';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -162,6 +162,8 @@ export function apply(ctx) {
     return parseAnalysis(output);
   };
 
+  void map.load().catch(error => log(`session map load failed: ${error.message}`));
+
   const bridge = new Bridge({
     stickers,
     stickerDir,
@@ -173,6 +175,7 @@ export function apply(ctx) {
     map,
     attachments: ctx.get('attachments'),
     mediaDir: join(stateDir, 'media'),
+    stateDir,
     controller: ctx.sessionController,
     userQuestions: ctx.get('userQuestions'),
     speech: ctx.get('speechToText'),
@@ -266,11 +269,14 @@ export function apply(ctx) {
   schedule(syncStickers, 12 * 3600_000);
 
   // Sessions that already carry a huge history keep paying for it every turn.
-  // Rebuild them once at startup, carrying their tail into the next message.
-  schedule(() => {
+  // Rebuild them shortly after boot, then periodically: a long-lived session
+  // grows past the budget between restarts, and the pass is cheap when idle.
+  const rebuildPass = () => {
     const limitKb = Number(store.get().conversation.autoRebuildKb) || 0;
     void bridge.autoRebuildSessions(limitKb).catch(error => log(`auto rebuild failed: ${error?.message ?? error}`));
-  }, 8_000, { once: true });
+  };
+  schedule(rebuildPass, 8_000, { once: true });
+  schedule(rebuildPass, 10 * 60_000);
 
   // Quota counters live in memory for speed; persist them so a restart does not
   // hand everyone a fresh daily allowance.
@@ -295,7 +301,7 @@ export function apply(ctx) {
     approvals.request(info.scene, execution.name, execution.arguments);
     const preview = approvals.pendingOf(info.scene)?.preview ?? '';
     const detail = preview === '' ? '' : `（${preview}）`;
-    return `这一步需要管理员确认：${execution.name}${detail}。请在 QQ 里回复 /yes（60 秒内有效，只批这一条），然后再让我重试。`;
+    return `这一步需要管理员确认：${execution.name}${detail}。请在 QQ 里回复 /yes（3 分钟内有效，只批这一条；或 /yes! 放开该工具 5 分钟），然后再让我重试。`;
   }));
 
   /** Panel opens requested from the pet's right-click menu. */
@@ -955,6 +961,7 @@ export function apply(ctx) {
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
 }
+
 
 
 

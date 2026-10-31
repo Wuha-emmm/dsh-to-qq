@@ -59,6 +59,7 @@ export class SessionMap {
    * @returns {Promise<void>} Resolves after the write.
    */
   async set(scene, sessionId) {
+    await this.load();
     this.entries[scene] = sessionId;
     await this.#flush();
   }
@@ -70,6 +71,7 @@ export class SessionMap {
    * @returns {Promise<void>} Resolves after the write.
    */
   async remove(scene) {
+    await this.load();
     delete this.entries[scene];
     await this.#flush();
   }

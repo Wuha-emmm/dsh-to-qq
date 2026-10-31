@@ -369,6 +369,10 @@ export class Bridge {
     /** Recap text waiting for the next message of a rebuilt scene. */
     /** Scenes rebuilt (not /新建): the next message carries a recap from the archive. */
     this.rebuildMarks = new Map();
+    /** Last reply text per scene, so a bare "啥意思" can point at it. */
+    this.lastReply = new Map();
+    /** Scene -> epoch ms of the last automatic rebuild, so a pass cannot thrash. */
+    this.autoRebuiltAt = new Map();
     /** Per-scene injection state: which fixed blocks the session already has. */
     this.injections = new Map();
     /** Directory for rebuilds.json; empty disables persistence. */
@@ -980,18 +984,37 @@ export class Bridge {
     }
 
     // `/yes` approves the tool the model just tried to run, then the admin retries.
-    if (tier === 'owner' && /^\/(yes|ok|确认)$/i.test(message.text.trim())) {
-      const approved = this.approvals?.grant(message.scene);
-      const label = approved === undefined
-        ? ''
-        : (approved.preview === '' ? approved.tool : `${approved.tool} ${approved.preview}`);
-      await this.sendText(
-        message,
-        approved === undefined
-          ? '现在没有待确认的操作（或已超过 5 分钟，需要让它重新试一次）。'
-          : `已确认 ${label}（60 秒内有效，只批这一条），让它重试就行。`,
-      );
-      return;
+    // `/yes` approves the pending call; a bare yes/好 counts too while one is
+    // pending, because people answer in chat rather than in commands.
+    if (tier === 'owner') {
+      const answer = message.text.trim();
+      const broad = /^\/yes!$/i.test(answer);
+      const explicit = /^\/(yes|ok|确认)$/i.test(answer);
+      const casual = /^(yes|y|ok|okay|确认|批准|好|行|可以)$/i.test(answer);
+      const pending = this.approvals?.pendingOf(message.scene);
+      if (broad) {
+        const tool = pending?.tool;
+        if (tool === undefined) {
+          await this.sendText(message, '先让它试一次，出现「需要管理员确认」之后再发 /yes!。');
+          return;
+        }
+        this.approvals.grantTool(message.scene, tool, 5 * 60_000);
+        await this.sendText(message, `已放行 ${tool} 5 分钟（这段时间内同类调用不用再确认）。`);
+        return;
+      }
+      if (explicit || (casual && pending !== undefined)) {
+        const approved = this.approvals?.grant(message.scene);
+        const label = approved === undefined
+          ? ''
+          : (approved.preview === '' ? approved.tool : `${approved.tool} ${approved.preview}`);
+        await this.sendText(
+          message,
+          approved === undefined
+            ? '现在没有待确认的操作（或已超过 5 分钟，需要让它重新试一次）。'
+            : `已确认 ${label}（3 分钟内有效，只批这一条）。想放开整个工具，发 /yes!`,
+        );
+        return;
+      }
     }
 
     if (this.paused) {
@@ -1050,7 +1073,11 @@ export class Bridge {
       const { parts: images, originals, sheets } = await promptImageParts(message.segments, this.log);
       const savedPaths = [];
       const quoted = await this.#resolveQuote(message);
-      const quotedText = quoted?.text;
+      // "啥意思" with no quote most likely points at my own previous reply.
+      const shortAsk = message.text.trim() !== '' && message.text.trim().length <= 6 && message.replyTo === undefined;
+      const remembered = this.lastReply.get(message.scene);
+      const quotedText = quoted?.text
+        ?? (shortAsk && remembered !== undefined ? `（我上一条说）${remembered.slice(0, 200)}` : undefined);
       // A rebuilt scene (marked earlier, possibly before a restart) carries its
       // tail exactly once. The same rows were just backfilled into the buffer,
       // so mark them seen to keep the context window free of duplicates.
@@ -1228,6 +1255,7 @@ export class Bridge {
         this.recordOutbound(message, body, undefined, result.reasoning);
       }
       this.counters.answered += 1;
+      this.lastReply.set(message.scene, body);
       replyChars = body.length;
       turnOk = true;
       this.log(`answered ${message.scene} (${tier}) via ${result.sessionId}${asImage ? ' as image' : ''}`);
@@ -1312,10 +1340,13 @@ export class Bridge {
    */
   async autoRebuildSessions(limitKb) {
     const limit = Number(limitKb) || 0;
+    await this.map?.load?.();
     if (limit <= 0) return [];
     const rebuilt = [];
     const entries = Object.entries(this.map?.all?.() ?? {});
     for (const [scene, sessionId] of entries) {
+      const lastAuto = this.autoRebuiltAt.get(scene) ?? 0;
+      if (Date.now() - lastAuto < 30 * 60_000) continue;
       if (!scene.startsWith('dm:') && !scene.startsWith('group:')) continue;
       let chars = 0;
       try {
@@ -1327,6 +1358,7 @@ export class Bridge {
       }
       if (chars < limit * 1024) continue;
       const result = await this.rebuildScene(scene, { reason: 'auto', limit: 14 });
+      this.autoRebuiltAt.set(scene, Date.now());
       rebuilt.push({ scene, chars, kept: result.recapChars });
     }
     if (rebuilt.length > 0) this.log(`auto rebuild: ${rebuilt.map(item => `${item.scene} ${Math.round(item.chars / 1024)}KB->${item.kept} chars`).join(', ')}`);

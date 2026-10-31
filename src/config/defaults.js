@@ -144,7 +144,7 @@ export function defaults() {
     },
     safety: {
       confirmWrite: true,
-      confirmTtlMs: 60000,
+      confirmTtlMs: 180_000,
       audit: true,
     },
     ui: {
@@ -186,7 +186,7 @@ export const RANGES = {
   'archive.retentionDays': [0, 3650],
   'archive.mediaRetentionDays': [0, 3650],
   'connection.botUin': [0, 99999999999],
-  'safety.confirmTtlMs': [10000, 600000],
+  'safety.confirmTtlMs': [10_000, 600_000],
 };
 
 /**
