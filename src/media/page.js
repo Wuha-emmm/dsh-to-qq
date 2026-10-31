@@ -265,7 +265,7 @@ export async function fetchPage(rawUrl, options = {}) {
       }
       lines.push(`链接：${resolved}`);
       const report = lines.join('\n');
-      return { url: resolved, title: video.title, description: video.description, text: report, report };
+      return { url: resolved, title: video.title, description: video.description, text: report, report, aid: video.aid, bvid };
     }
   }
 
@@ -284,7 +284,7 @@ export async function fetchPage(rawUrl, options = {}) {
   const type = String(response.headers.get('content-type') ?? '');
   if (type.includes('application/json')) {
     const raw = await response.text();
-    return { url: resolved, title: '', description: '', text: raw.slice(0, maxChars), report: raw.slice(0, maxChars) };
+    return { url: resolved, title: '', description: '', text: raw.slice(0, maxChars), report: raw.slice(0, maxChars), aid: 0, bvid: '' };
   }
   const buffer = Buffer.from(await response.arrayBuffer());
   const html = buffer.subarray(0, MAX_BYTES).toString('utf8');
@@ -302,5 +302,5 @@ export async function fetchPage(rawUrl, options = {}) {
     `链接：${resolved}`,
     text === '' ? '' : `正文：${text}`,
   ].filter(line => line !== '').join('\n');
-  return { url: resolved, title: fields.title, description: fields.description, text, report };
+  return { url: resolved, title: fields.title, description: fields.description, text, report, aid: 0, bvid: '' };
 }

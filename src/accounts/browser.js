@@ -110,6 +110,33 @@ function command(socket, id, method, params = {}) {
 }
 
 /**
+ * Open one URL in the sign-in browser (which is what writes its history).
+ *
+ * @param {number} port Debug port.
+ * @param {string} url Target URL.
+ * @param {{ WebSocketImpl?: typeof WebSocket, fetchImpl?: typeof fetch }} [options] Wiring.
+ * @returns {Promise<boolean>} True when a tab was created.
+ */
+export async function openUrl(port, url, options = {}) {
+  const WebSocketImpl = options.WebSocketImpl ?? WebSocket;
+  const endpoint = await devtoolsEndpoint(port, options.fetchImpl);
+  const socket = new WebSocketImpl(endpoint);
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('devtools 连接超时')), 5000);
+    socket.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
+    socket.addEventListener('error', () => { clearTimeout(timer); reject(new Error('devtools 连接失败')); }, { once: true });
+  });
+  try {
+    await command(socket, 1, 'Target.createTarget', { url });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    socket.close();
+  }
+}
+
+/**
  * Read every cookie from a running sign-in browser.
  *
  * @param {number} port Debug port.

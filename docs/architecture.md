@@ -162,3 +162,19 @@ DSH 在上下文接近窗口上限时会自动压缩（默认 `thresholdRatio 0.
 扫码登录这条路 B站已经不对外提供，所以不再实现。cookie 仍可直接粘贴作为备用。B站用 `x/web-interface/nav` 校验登录态。
 
 cookie 存在状态目录的 `accounts.json`（不写进 `config.json`，面板只回状态不回 cookie）。`fetch_page` 只对匹配域名附加 cookie（`bilibili.com/b23.tv/hdslb.com`、`xiaohongshu.com/xhslink.com/xhscdn.com`），其他站点不受影响。
+
+## 用登录的账号写 B站
+
+「登录」页签存下的 cookie 只有一个用途之外的第二个用途：`bilibili` 工具可以带着它**搜视频、开浏览器、发评论、发动态、上报观看记录**。
+
+| 动作 | 接口 | 说明 |
+|---|---|---|
+| `search` | `x/web-interface/wbi/search/type`（WBI 签名） | 顺带在登录浏览器打开搜索页和第一条结果，浏览器历史里能看到 |
+| `open` | DevTools `Target.createTarget` | 在你自己的登录窗口里打开页面 |
+| `comment` | `x/v2/reply/add` + `csrf`（`bili_jct`） | 需要视频 aid |
+| `dynamic` | `x/dynamic/feed/create/dyn`（WBI + csrf） | 纯文字动态 |
+| `history` | `x/v2/history/report`（先取 cid） | B站返回 OK，但是否出现在观看记录里要等真实播放 |
+
+WBI 签名：从 `nav` 取 `wbi_img` 两个 key，按固定置换表混成 32 位 key，再把参数排序拼接后 `md5(query + key)` 得到 `w_rid`。
+
+**只有管理员能用**（不在任何群的工具白名单里）。B站风控可能拒绝写入并回 `-412`，工具会把这个原始原因带回给模型，不做美化。

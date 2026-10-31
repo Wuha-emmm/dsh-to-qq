@@ -23,6 +23,7 @@ import { describePrompt, parseAnalysis, DESCRIBE_SYSTEM } from './stickers/descr
 import { registerStickerTool } from './tools/stickers.js';
 import { registerEmojiTool } from './tools/emoji.js';
 import { registerPageTool } from './tools/page.js';
+import { registerBilibiliTool } from './tools/bilibili.js';
 import { AccountStore } from './accounts/store.js';
 import { verifyLogin } from './accounts/bilibili.js';
 import { findBrowser, launchBrowser, readBrowserCookies, cookieHeaderFrom, hasBilibiliSession } from './accounts/browser.js';
@@ -43,7 +44,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.71.0';
+const VERSION = '0.72.0';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -1212,7 +1213,15 @@ export function apply(ctx) {
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
   ctx.effect(() => registerPageTool(ctx, { log, cookieFor: url => accounts.cookieFor(url) }));
+  ctx.effect(() => registerBilibiliTool(ctx, {
+    accounts,
+    profileDir: browserProfile,
+    debugPort: () => Number(store.get().accounts?.debugPort) || 9333,
+    browserPath: () => store.get().accounts?.browserPath ?? '',
+    log,
+  }));
 }
+
 
 
 
