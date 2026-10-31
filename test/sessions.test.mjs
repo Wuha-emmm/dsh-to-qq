@@ -42,6 +42,9 @@ class FakeController {
         seq: seq + 1,
         data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '你好，我是 DSH' }] } },
       });
+      if (this.compaction === true) {
+        this.push({ type: 'compaction/end', seq: seq + 1.5, data: { removed: 10 } });
+      }
       this.push({ type: 'turn/end', seq: seq + 2, data: { turn: 1, reason: { kind: 'completed' } } });
     }, this.delayMs);
     return { accepted: true };
@@ -189,3 +192,29 @@ test('guest scenes pre-bind an id and record the tier even when the controller r
   }
 });
 
+test('a compaction during the turn is reported to the bridge', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-to-qq-sess-'));
+  const map = new SessionMap(join(dir, 'sessions.json'));
+  try {
+    const controller = new FakeController();
+    controller.compaction = true;
+    const driver = new DshDriver({ controller, map, log: () => {} });
+    const result = await driver.ask({ scene: 'dm:1', text: '你好', timeoutMs: 5000 });
+    assert.equal(result.compacted, true);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('a plain turn is not reported as compacted', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-to-qq-sess-'));
+  const map = new SessionMap(join(dir, 'sessions.json'));
+  try {
+    const controller = new FakeController();
+    const driver = new DshDriver({ controller, map, log: () => {} });
+    const result = await driver.ask({ scene: 'dm:1', text: '你好', timeoutMs: 5000 });
+    assert.equal(result.compacted, false);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});

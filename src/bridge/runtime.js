@@ -382,6 +382,8 @@ export class Bridge {
     this.titledSessions = new Set();
     /** Sessions created from a rebuild mark; their title says so. */
     this.continuedSessions = new Set();
+    /** How often DSH condensed a session and when; shown by qq_status. */
+    this.compactionStats = { count: 0, lastAt: 0 };
     /** Scenes whose next session continues a rebuilt one. */
     this.pendingContinue = new Set();
     /** group id -> display name, so a title costs one call. */
@@ -1275,6 +1277,13 @@ export class Bridge {
         },
       });
       turnUsage = result.usage ?? null;
+      if (result.compacted === true) {
+        // The summary swallowed the memory card, rules, sticker list and length
+        // hint; forgetting the ledger makes the next message send them again.
+        this.injections.delete(message.scene);
+        this.compactionStats = { count: (this.compactionStats?.count ?? 0) + 1, lastAt: Date.now() };
+        this.log(`history compacted for ${message.scene}; anchors will be re-sent`);
+      }
       turnSearchCalls = Number(result.searchCalls) || 0;
       turnFetchCalls = Number(result.fetchCalls) || 0;
       // A card is the answer: drop the "已发送" text that usually follows it.

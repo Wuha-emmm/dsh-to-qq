@@ -39,7 +39,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.58.2';
+const VERSION = '0.59.0';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -1060,6 +1060,12 @@ export function apply(ctx) {
           if (last === undefined) return 'usage: 还没有记录';
           return `usage: 上一轮 输入 ${last.input_tokens} / 输出 ${last.output_tokens} / 缓存 ${last.cache_tokens}`;
         })(),
+        (() => {
+          const stats = bridge.compactionStats ?? { count: 0, lastAt: 0 };
+          return stats.count === 0
+            ? 'compact: 还没有压缩过'
+            : `compact: ${stats.count} 次 / 最近 ${new Date(stats.lastAt).toLocaleString('zh-CN', { hour12: false })}`;
+        })(),
         `impressions: filled ${bridge.impressionStats.backfillFilled} / scanned ${bridge.impressionStats.scanned} / failed ${bridge.impressionStats.failed} / retried ${bridge.impressionStats.retried ?? 0} / last ${bridge.impressionStats.lastAt === 0 ? 'never' : new Date(bridge.impressionStats.lastAt).toLocaleString('zh-CN', { hour12: false })}${bridge.impressionStats.lastError === '' ? '' : ` (error: ${bridge.impressionStats.lastError})`}`,
         `stickers: ${bridge.stickers?.size ?? 0} known / ${bridge.stickers?.all().filter(item => item.desc !== '').length ?? 0} described / synced ${bridge.stickerStats.syncedAt === 0 ? 'never' : new Date(bridge.stickerStats.syncedAt).toLocaleString('zh-CN', { hour12: false })}`,
         pending.length === 0 ? 'ready' : `pending: ${pending.join('; ')}`,
@@ -1073,6 +1079,7 @@ export function apply(ctx) {
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
 }
+
 
 
 

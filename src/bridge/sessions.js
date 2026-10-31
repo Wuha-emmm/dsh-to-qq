@@ -276,6 +276,8 @@ export class DshDriver {
     /** Successful tool calls billed per request by the provider. */
     let searchCalls = 0;
     let fetchCalls = 0;
+    /** DSH condensed the history during this turn; fixed blocks are gone. */
+    let compacted = false;
 
     /** Resolves when the turn ends, fails, or the stream closes. */
     let settle;
@@ -310,6 +312,7 @@ export class DshDriver {
           if (type === 'turn/start' && ourTurnStart === -1 && seq > baseline) ourTurnStart = seq;
 
           const base = promptSeq !== -1 ? promptSeq : ourTurnStart;
+          if (type === 'compaction/end') compacted = true;
           const callName = type === 'tool/call' ? String(event.data?.name ?? event.data?.toolName ?? '') : '';
           if (callName === 'web_search') searchCalls += 1;
           if (callName === 'web_fetch') fetchCalls += 1;
@@ -397,7 +400,7 @@ export class DshDriver {
     const text = reply.trim();
     const failure = turnReason?.kind === 'error' ? turnReason.error?.message : undefined;
     if (text === '' && failure !== undefined) throw new Error(`agent failed: ${failure}`);
-    return { sessionId, text, reasoning: reasoning.trim(), sessionBound: true, usage, searchCalls, fetchCalls };
+    return { sessionId, text, reasoning: reasoning.trim(), sessionBound: true, usage, searchCalls, fetchCalls, compacted };
   }
 }
 
