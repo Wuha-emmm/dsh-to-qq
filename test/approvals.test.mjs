@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Approvals, DANGEROUS_TOOLS, callSignature } from '../src/policy/approvals.js';
+import { Approvals, DANGEROUS_TOOLS, callSignature, looksLikeApproval } from '../src/policy/approvals.js';
 
 test('a grant only covers the exact call that was requested', () => {
   const approvals = new Approvals();
@@ -57,4 +57,22 @@ test('the dangerous set covers the write and execute tools', () => {
     assert.equal(DANGEROUS_TOOLS.has(name), true, name);
   }
   assert.equal(DANGEROUS_TOOLS.has('read'), false);
+});
+
+test('an approval word tolerates the typos people actually type', () => {
+  for (const text of ['/yes', '/yes!', 'yes', 'Yes', '好', '确认', '同意', '/yse!', 'yse', 'ys', 'ye']) {
+    assert.equal(looksLikeApproval(text), true, text);
+  }
+  for (const text of ['no', '/no', '不是', '不要', '取消', '']) {
+    assert.equal(looksLikeApproval(text), false, text);
+  }
+});
+
+test('全放行 covers every guarded tool for the window', () => {
+  const approvals = new Approvals();
+  approvals.request('dm:1', 'edit', { path: 'config.json' });
+  const granted = approvals.grantTools('dm:1', ['pwsh', 'edit', 'write', 'plugin_manager']);
+  assert.deepEqual(granted.tools, ['pwsh', 'edit', 'write', 'plugin_manager']);
+  for (const tool of granted.tools) assert.equal(approvals.allowed('dm:1', tool, { x: 1 }), true, tool);
+  assert.equal(approvals.allowed('dm:1', 'edit', {}, Date.now() + 6 * 60_000), false, 'expires');
 });

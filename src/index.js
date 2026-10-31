@@ -43,7 +43,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.70.1';
+const VERSION = '0.71.0';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -347,7 +347,7 @@ export function apply(ctx) {
     approvals.request(info.scene, execution.name, execution.arguments);
     const preview = approvals.pendingOf(info.scene)?.preview ?? '';
     const detail = preview === '' ? '' : `（${preview}）`;
-    return `这一步需要管理员确认：${execution.name}${detail}。请在 QQ 里回复 /yes（3 分钟内有效，只批这一条；或 /yes! 放开该工具 5 分钟），然后再让我重试。`;
+    return `这一步需要管理员确认：${execution.name}${detail}。请在 QQ 里回复 /yes（3 分钟内只批这一条；/yes! 放开该工具 5 分钟；/全放行 一次放开全部危险工具 5 分钟），然后再让我重试。`;
   }));
 
   /** Panel opens requested from the pet's right-click menu. */
@@ -1213,6 +1213,7 @@ export function apply(ctx) {
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
   ctx.effect(() => registerPageTool(ctx, { log, cookieFor: url => accounts.cookieFor(url) }));
 }
+
 
 
 

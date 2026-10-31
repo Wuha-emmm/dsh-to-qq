@@ -13,6 +13,7 @@ import { normalizeRequestEvent, describeRequest } from './requests.js';
 import { buildReplySegments, memberNames } from './mentions.js';
 import { admit, blockedWord, tierOf } from '../policy/tiers.js';
 import { Quota, Semaphore } from '../policy/quota.js';
+import { looksLikeApproval } from '../policy/approvals.js';
 import { SceneBuffer, renderContext } from '../context/buffer.js';
 import { InjectionTracker, entrySignature } from '../context/injection.js';
 import { formatRecap } from '../context/recap.js';
@@ -1054,10 +1055,17 @@ export class Bridge {
 
     if (tier === 'owner') {
       const answer = message.text.trim();
+      const allowAll = /^\/(全放行|allowall)$/i.test(answer);
       const broad = /^\/yes!$/i.test(answer);
       const explicit = /^\/(yes|ok|确认)$/i.test(answer);
-      const casual = /^(yes|y|ok|okay|确认|批准|好|行|可以)$/i.test(answer);
+      const casual = looksLikeApproval(answer);
       const pending = this.approvals?.pendingOf(message.scene);
+      if (allowAll) {
+        const granted = this.approvals.grantTools(message.scene, ['pwsh', 'edit', 'write', 'plugin_manager'], 5 * 60_000);
+        await this.sendText(message, `已放行全部工具 5 分钟（${granted.tools.join('、')}），正在继续刚才的操作…`);
+        await this.#resumeAfterApproval(message, '所有危险工具已放行 5 分钟');
+        return;
+      }
       if (broad) {
         const tool = pending?.tool;
         if (tool === undefined) {
@@ -1065,7 +1073,7 @@ export class Bridge {
           return;
         }
         this.approvals.grantTool(message.scene, tool, 5 * 60_000);
-        await this.sendText(message, `已放行 ${tool} 5 分钟，正在继续刚才的操作…`);
+        await this.sendText(message, `已放行 ${tool} 5 分钟，正在继续刚才的操作…（要多工具一起放行就发 /全放行）`);
         await this.#resumeAfterApproval(message, '该工具已放行 5 分钟');
         return;
       }

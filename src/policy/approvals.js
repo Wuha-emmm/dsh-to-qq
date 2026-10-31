@@ -115,7 +115,14 @@ export class Approvals {
    */
   allowed(scene, tool, args, now = Date.now()) {
     const broad = this.toolGrants.get(scene);
-    if (broad !== undefined) {
+    if (broad instanceof Map) {
+      const entry = broad.get(tool);
+      if (entry !== undefined) {
+        if (now > entry.until) broad.delete(tool);
+        else return true;
+      }
+      if (broad.size === 0) this.toolGrants.delete(scene);
+    } else if (broad !== undefined) {
       if (now > broad.until) this.toolGrants.delete(scene);
       else if (broad.tool === tool) return true;
     }
@@ -142,6 +149,34 @@ export class Approvals {
     this.toolGrants.set(scene, { tool, until });
     this.pending.delete(scene);
     return { tool, until };
+  }
+
+  /**
+   * Approve several tools for a window (the `/全放行` shortcut).
+   *
+   * Owner DMs only: a multi-step task (`pwsh` then `edit`) would otherwise ask
+   * once per tool.
+   *
+   * @param {string} scene Scene key.
+   * @param {ReadonlyArray<string>} tools Tool names.
+   * @param {number} [ttlMs] How long the override lasts.
+   * @returns {{ tools: string[], until: number }} The overrides.
+   */
+  grantTools(scene, tools, ttlMs = 5 * 60_000) {
+    const until = Date.now() + Math.max(10_000, Number(ttlMs) || 0);
+    const names = (Array.isArray(tools) ? tools : []).filter(tool => typeof tool === 'string' && tool !== '');
+    // One entry per tool: Map scene -> list of { tool, until }.
+    const existing = this.toolGrants.get(scene);
+    const merged = new Map();
+    if (existing !== undefined && existing instanceof Map) {
+      for (const [tool, entry] of existing) merged.set(tool, entry);
+    } else if (existing !== undefined) {
+      merged.set(existing.tool, existing);
+    }
+    for (const tool of names) merged.set(tool, { tool, until });
+    this.toolGrants.set(scene, merged);
+    this.pending.delete(scene);
+    return { tools: names, until };
   }
 
   /** @param {string} scene Scene key. @returns {void} */
@@ -192,4 +227,47 @@ function previewOf(args) {
  */
 function safeParse(text) {
   try { return JSON.parse(text); } catch { return null; }
+}
+
+/**
+ * Edit distance between two short strings.
+ *
+ * @param {string} left First string.
+ * @param {string} right Second string.
+ * @returns {number} Distance.
+ */
+function distance(left, right) {
+  const rows = Array.from({ length: left.length + 1 }, (_, index) => index);
+  for (let column = 1; column <= right.length; column += 1) {
+    let previous = rows[0];
+    rows[0] = column;
+    for (let row = 1; row <= left.length; row += 1) {
+      const current = rows[row];
+      rows[row] = Math.min(
+        rows[row] + 1,
+        rows[row - 1] + 1,
+        previous + (left[row - 1] === right[column - 1] ? 0 : 1),
+      );
+      previous = current;
+    }
+  }
+  return rows[left.length];
+}
+
+/**
+ * Whether a chat line means "approved", tolerating a typo like `/yse!`.
+ *
+ * @param {string} text Raw message text.
+ * @returns {boolean} True for an approval word.
+ */
+export function looksLikeApproval(text) {
+  const raw = String(text ?? '').trim().replace(/^\//, '').replace(/[!！]+$/, '').toLowerCase();
+  if (raw === '') return false;
+  if (['yes', 'y', 'ok', 'okay', '是', '好', '行', '可以', '确认', '批准', '同意', '允许', '放行'].includes(raw)) return true;
+  // One-character slips and swapped neighbours are the common cases in chat
+  // ("yse", "ys", "ye"): Levenshtein counts a transposition as two edits.
+  if (raw.length <= 4 && distance(raw, 'yes') <= 1) return true;
+  if (raw.length === 3 && raw[0] === 'y' && raw[1] === 'e' && raw[2] === 's') return true;
+  if (raw.length === 3 && raw[0] === 'y' && raw[1] === 's' && raw[2] === 'e') return true;
+  return false;
 }
