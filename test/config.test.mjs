@@ -9,16 +9,16 @@ test('defaults expose every documented section', () => {
   }
   assert.equal(config.conversation.groupHistory > 0, true);
   assert.equal(config.limits.replyDelayMs, 2000);
-  assert.equal(config.limits.memberDaily, 20);
+  assert.equal(config.limits.memberDaily, 100);
   assert.equal(config.archive.retentionDays, 30);
 });
 
 test('mergeConfig keeps unknown input out and fills gaps', () => {
   const config = mergeConfig({ limits: { memberDaily: 5 }, unknown: { a: 1 } });
   assert.equal(config.limits.memberDaily, 5);
-  assert.equal(config.limits.groupDaily, 200);
+  assert.equal(config.limits.groupDaily, 400);
   assert.equal(config.unknown, undefined);
-  assert.equal(mergeConfig(null).limits.concurrency, 2);
+  assert.equal(mergeConfig(null).limits.concurrency, 4);
   assert.equal(mergeConfig('nope').memory.summaryLimit, 1000);
 });
 
