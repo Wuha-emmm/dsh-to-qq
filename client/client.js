@@ -856,10 +856,27 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = React.useState('');
       const [busy, setBusy] = React.useState('');
       const [cookieInput, setCookieInput] = React.useState({ bilibili: '', xiaohongshu: '' });
+      const [stale, setStale] = React.useState({ bilibili: false, xiaohongshu: false });
       const load = () => getJson('/dsh-to-qq/api/accounts')
         .then(setState)
         .catch(reason => setNotice(`读取失败：${reason?.message ?? reason}`));
-      React.useEffect(() => { void load(); }, []);
+      const refresh = async () => {
+        await load();
+        try {
+          const result = await postJson('/dsh-to-qq/api/accounts', { action: 'verify', provider: 'bilibili' });
+          const accounts = result?.accounts ?? {};
+          setStale({
+            bilibili: accounts.bilibili?.loggedIn === true && result.loggedIn !== true,
+            xiaohongshu: false,
+          });
+          if (accounts.bilibili?.loggedIn === true && result.loggedIn !== true) {
+            setNotice('B站登录态已失效，需要重新登录');
+          }
+        } catch {
+          // A verification failure must not hide the stored state.
+        }
+      };
+      React.useEffect(() => { void refresh(); }, []);
       const openBrowser = async provider => {
         setBusy(provider);
         setNotice('正在打开登录窗口…');
@@ -880,6 +897,7 @@ window.__ModuleLoader__.load({
           const result = await postJson('/dsh-to-qq/api/accounts', { action: 'browser-read', provider });
           if (result.ok !== true) { setNotice(result.error ?? '读取失败'); return; }
           setNotice(`${provider === 'bilibili' ? 'B站' : '小红书'}已登录${result.nickname ? `：${result.nickname}` : ''}`);
+          setStale(current => ({ ...current, [provider]: false }));
           await load();
         } catch (reason) {
           setNotice(`读取失败：${reason?.message ?? reason}`);
@@ -896,6 +914,7 @@ window.__ModuleLoader__.load({
           if (result.ok !== true) { setNotice(result.error ?? '保存失败'); return; }
           setNotice(`${provider === 'bilibili' ? 'B站' : '小红书'}已保存${result.nickname ? `：${result.nickname}` : ''}`);
           setCookieInput(current => ({ ...current, [provider]: '' }));
+          setStale(current => ({ ...current, [provider]: false }));
           await load();
         } catch (reason) {
           setNotice(`保存失败：${reason?.message ?? reason}`);
@@ -915,12 +934,30 @@ window.__ModuleLoader__.load({
           setBusy('');
         }
       };
-      const statusLine = provider => {
+      // Colour carries the state: yellow = not signed in, green = signed in.
+      const statusOf = provider => {
         const entry = state?.accounts?.[provider];
-        if (entry === undefined) return '读取中…';
-        if (entry.loggedIn !== true) return '未登录';
+        if (entry === undefined) {
+          return { text: '读取中…', color: 'var(--dsw-alias-label-secondary, inherit)', dot: 'var(--dsw-alias-border-l1, rgba(127,127,127,.4))' };
+        }
+        if (entry.loggedIn !== true) {
+          return { text: '未登录', color: 'var(--dsw-alias-state-warn-primary, #b45309)', dot: '#eab308' };
+        }
+        if (stale[provider] === true) {
+          return { text: '登录已失效，请重新登录', color: 'var(--dsw-alias-state-warn-primary, #b45309)', dot: '#eab308' };
+        }
         const who = entry.nickname === '' ? (entry.uid > 0 ? `UID ${entry.uid}` : '已保存 cookie') : entry.nickname;
-        return `已登录：${who}（${entry.method === 'browser' ? '登录窗口' : 'cookie'}）`;
+        return {
+          text: `已登录：${who}（${entry.method === 'browser' ? '登录窗口' : 'cookie'}）`,
+          color: 'var(--dsw-alias-state-success-primary, #16a34a)',
+          dot: '#22c55e',
+        };
+      };
+      const statusView = provider => {
+        const status = statusOf(provider);
+        return h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, fontSize: 11.5, color: status.color } },
+          h('span', { style: { width: 8, height: 8, borderRadius: '50%', background: status.dot, flex: '0 0 auto' } }),
+          h('span', null, status.text));
       };
       const cookieRow = (provider, placeholder) => h('div', { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
         h('input', {
@@ -932,8 +969,10 @@ window.__ModuleLoader__.load({
         }),
         h('button', { key: 'save', type: 'button', onClick: () => void saveCookie(provider), disabled: busy !== '', style: UI.ghost }, '保存 cookie'));
       const providerCard = (provider, title, note) => h('div', { style: { marginBottom: 14 } },
-        h('div', { style: { fontSize: 12.5 } }, title),
-        h('div', { style: UI.muted }, statusLine(provider)),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+          h('div', { style: { fontSize: 12.5, flex: 1 } }, title),
+          h('button', { type: 'button', onClick: () => void refresh(), disabled: busy !== '', style: { ...UI.ghost, padding: '2px 8px', fontSize: 11 } }, '刷新状态')),
+        statusView(provider),
         h('div', { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
           h('button', { key: 'open', type: 'button', onClick: () => void openBrowser(provider), disabled: busy !== '', style: UI.primary }, '打开登录窗口'),
           h('button', { key: 'read', type: 'button', onClick: () => void readLogin(provider), disabled: busy !== '', style: UI.ghost }, '读取登录状态'),
