@@ -26,3 +26,6 @@ coverage/
 .dsh/
 .env
 *.local.json
+
+# Local screenshots (never publish desktop captures)
+/shots/

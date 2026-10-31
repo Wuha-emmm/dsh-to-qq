@@ -59,7 +59,9 @@ export function defaults() {
       blockedWords: [],
     },
     models: {
-      owner: { provider: '', model: '', effort: '' },
+      /** Permission preset applied to each QQ session; empty leaves the deployment default. */
+      permissionPreset: 'danger-full-access',
+      owner: { provider: '', model: '', effort: 'high' },
       member: { provider: '', model: '', effort: '' },
       summarizer: { provider: '', model: '', effort: '' },
     },
@@ -227,6 +229,7 @@ export function normalize(config) {
     'access.groupMode': ['whitelist', 'blacklist', 'all'],
     'limits.overLimit': ['refuse', 'silent', 'queue'],
     'output.style': ['light', 'dark', 'bubble'],
+    'models.permissionPreset': ['', 'auto', 'workspace-write', 'danger-full-access'],
   };
   for (const [path, allowed] of Object.entries(enums)) {
     const [section, key] = path.split('.');

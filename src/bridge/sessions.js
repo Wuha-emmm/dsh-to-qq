@@ -115,6 +115,8 @@ export class DshDriver {
     this.onToolCall = options.onToolCall ?? (() => {});
     /** @type {(() => Promise<{ provider: string, model: string } | undefined>) | undefined} */
     this.chooseModel = options.chooseModel;
+    /** @type {((sessionId: string) => Promise<void>) | undefined} */
+    this.applyPermission = options.applyPermission;
   }
 
   /**
@@ -159,13 +161,14 @@ export class DshDriver {
       try {
         const route = await this.chooseModel();
         if (route !== undefined && route.provider !== '') {
-          await this.controller.selectModel({ sessionId, provider: route.provider, model: route.model });
+          await this.#selectModel(sessionId, route);
         }
       } catch (error) {
         this.log(`select model for ${sessionId} failed: ${String(error?.message ?? error).slice(0, 120)}`);
       }
     }
 
+    await this.applyPermission?.(sessionId).catch(error => this.log(`permission preset failed: ${String(error?.message ?? error).slice(0, 120)}`));
     this.log(`bound ${scene} -> ${sessionId} (${tier})`);
     return sessionId;
   }
@@ -193,18 +196,46 @@ export class DshDriver {
     await this.controller.rename({ sessionId, title: title.slice(0, 60) });
   }
 
+  /**
+   * Select the model, with the configured reasoning level when there is one.
+   *
+   * A provider that does not accept a level rejects the whole selection, so the
+   * fallback retries without it rather than failing the turn.
+   *
+   * @param {string} sessionId Target session.
+   * @param {{ provider: string, model: string, effort?: string }} route Route to install.
+   * @returns {Promise<void>} Resolves after the selection.
+   */
+  async #selectModel(sessionId, route) {
+    const effort = typeof route.effort === 'string' ? route.effort : '';
+    const request = { sessionId, provider: route.provider, model: route.model };
+    if (effort === '') {
+      await this.controller.selectModel(request);
+      return;
+    }
+    try {
+      await this.controller.selectModel({ ...request, reasoningEffort: effort });
+    } catch (error) {
+      this.log(`reasoning effort ${effort} rejected for ${sessionId}: ${String(error?.message ?? error).slice(0, 100)}`);
+      await this.controller.selectModel(request);
+    }
+  }
+
   async ask(request) {
     let sessionId = await this.sessionFor(request.scene, request.cwd, request.tier ?? 'owner');
     // An already-bound scene may point at a session created before the route was
     // pinned; re-select so a stale provider does not fail the turn.
     if (request.model !== undefined && request.model.provider !== '') {
       try {
-        await this.controller.selectModel({ sessionId, ...request.model });
+        await this.#selectModel(sessionId, request.model);
       } catch (error) {
         this.log(`select model for ${sessionId} failed: ${String(error?.message ?? error).slice(0, 120)}`);
       }
     }
     request.onSession?.(sessionId);
+    // Resumed sessions also need the preset: a session created elsewhere keeps
+    // the deployment default until something writes its permission events.
+    await this.applyPermission?.(sessionId).catch(error => this.log(`permission preset failed: ${String(error?.message ?? error).slice(0, 120)}`));
     try {
       return await this.#runTurn(sessionId, request);
     } catch (error) {

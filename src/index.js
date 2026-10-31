@@ -38,7 +38,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.54.2';
+const VERSION = '0.55.0';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -80,6 +80,19 @@ export function apply(ctx) {
       return route.provider === '' || route.model === '' ? undefined : route;
     },
     controller: ctx.sessionController,
+    applyPermission: async sessionId => {
+      const preset = store.get().models.permissionPreset;
+      if (typeof preset !== 'string' || preset === '') return;
+      const presets = ctx.get('permissionPresets');
+      if (presets === undefined || typeof presets.set !== 'function') return;
+      // The write path needs a live Session; resolveAgent resumes one on demand.
+      const resolved = await ctx.sessionController.resolveAgent(sessionId).catch(() => undefined);
+      const agent = resolved?.agent ?? ctx.get('agents')?.get?.(sessionId);
+      if (agent === undefined) return;
+      if (presets.current?.(agent.session) === preset) return;
+      presets.set(agent.session, preset);
+      log(`permission preset ${preset} applied to ${sessionId}`);
+    },
     map,
     guests,
     guestStore,
@@ -948,6 +961,7 @@ export function apply(ctx) {
         `questions parked: ${bridge.questions.size === 0 ? 'none' : [...bridge.questions.keys()].join(', ')}`,
         `events seen: ${eventTypes.size === 0 ? '(none yet)' : [...eventTypes].join(', ')}`,
         bridge.lastToolCall === '' ? 'tool calls: none yet' : `last tool call: ${bridge.lastToolCall}`,
+        `models: preset ${config.models.permissionPreset || "（跟随 DSH）"} / owner effort ${config.models.owner.effort || "（默认）"}`,
         `impressions: filled ${bridge.impressionStats.backfillFilled} / scanned ${bridge.impressionStats.scanned} / failed ${bridge.impressionStats.failed} / retried ${bridge.impressionStats.retried ?? 0} / last ${bridge.impressionStats.lastAt === 0 ? 'never' : new Date(bridge.impressionStats.lastAt).toLocaleString('zh-CN', { hour12: false })}${bridge.impressionStats.lastError === '' ? '' : ` (error: ${bridge.impressionStats.lastError})`}`,
         `stickers: ${bridge.stickers?.size ?? 0} known / ${bridge.stickers?.all().filter(item => item.desc !== '').length ?? 0} described / synced ${bridge.stickerStats.syncedAt === 0 ? 'never' : new Date(bridge.stickerStats.syncedAt).toLocaleString('zh-CN', { hour12: false })}`,
         pending.length === 0 ? 'ready' : `pending: ${pending.join('; ')}`,
@@ -961,6 +975,7 @@ export function apply(ctx) {
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
 }
+
 
 
 

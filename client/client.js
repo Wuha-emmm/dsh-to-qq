@@ -1270,6 +1270,20 @@ const StickerBoard = () => {
                 catalog,
                 onChange: next => setConfig(current => setPath(current, `models.${tier.id}`, next)),
               }))),
+              h('div', { key: 'permission', style: { marginTop: 6 } },
+                fieldRow({
+                  path: 'models.permissionPreset',
+                  label: 'QQ 会话权限',
+                  type: 'select',
+                  options: [
+                    { value: '', label: '跟随 DSH 默认' },
+                    { value: 'danger-full-access', label: '完全访问' },
+                    { value: 'workspace-write', label: '只能写工作区' },
+                    { value: 'auto', label: '自动' },
+                  ],
+                }),
+                h('div', { style: { ...UI.muted, padding: '2px 0 8px' } },
+                  '新建和恢复的 QQ 会话都会套用这个权限，和 DSH 窗口对齐；改完下一轮生效')),
           ]
           : [
             h('div', { key: 'card', style: UI.card },

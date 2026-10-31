@@ -42,9 +42,10 @@
 
 | 键 | 默认值 | 范围 | 说明 |
 |---|---|---|---|
+| `permissionPreset` | `danger-full-access` | — |  |
 | `owner.provider` | `""`（空） | — | 管理员私聊使用的服务商；空 = DSH 默认 |
 | `owner.model` | `""`（空） | — | 管理员私聊模型；空 = 该服务商首个模型 |
-| `owner.effort` | `""`（空） | — | 管理员私聊的推理级别；空 = 默认 |
+| `owner.effort` | `high` | — | 管理员私聊的推理级别；空 = 默认 |
 | `member.provider` | `""`（空） | — | 访客与群成员使用的服务商；空 = DSH 默认 |
 | `member.model` | `""`（空） | — | 访客与群成员模型 |
 | `member.effort` | `""`（空） | — | 访客与群成员的推理级别 |
