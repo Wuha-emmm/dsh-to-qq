@@ -38,7 +38,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.55.2';
+const VERSION = '0.56.0';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -738,6 +738,18 @@ export function apply(ctx) {
         return;
       }
 
+      if (url.pathname === '/dsh-to-qq/api/sessions') {
+        try {
+          if (req.method === 'POST') {
+            send(200, { ok: true, ...(await bridge.cleanupSessions({ dry: false })) });
+            return;
+          }
+          send(200, await bridge.cleanupSessions({ dry: true }));
+        } catch (error) {
+          send(500, { ok: false, error: String(error?.message ?? error).slice(0, 200) });
+        }
+        return;
+      }
       if (url.pathname === '/dsh-to-qq/api/impressions') {
         const stats = bridge.impressionStats;
         if (req.method === 'POST') {
@@ -828,6 +840,7 @@ export function apply(ctx) {
       { kind: 'exact', path: '/dsh-to-qq/api/prune' },
       { kind: 'exact', path: '/dsh-to-qq/api/memory' },
       { kind: 'exact', path: '/dsh-to-qq/api/impressions' },
+      { kind: 'exact', path: '/dsh-to-qq/api/sessions' },
       { kind: 'exact', path: '/dsh-to-qq/api/stickers' },
       { kind: 'exact', path: '/dsh-to-qq/api/stickers/preview' },
       { kind: 'exact', path: '/dsh-to-qq/api/stickers/update' },
@@ -981,6 +994,7 @@ export function apply(ctx) {
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
 }
+
 
 
 

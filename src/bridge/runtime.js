@@ -742,46 +742,23 @@ export class Bridge {
       }
       case 'cleanup': {
         const preview = /预览|dry/i.test(command.arg);
-        const config = this.store.get();
-        let items = [];
-        try {
-          items = extractSessions(await this.controller.list({}, AbortSignal.timeout(8000)));
-        } catch (error) {
-          await this.sendText(message, `取会话列表失败：${String(error?.message ?? error).slice(0, 140)}`);
-          return;
-        }
-        const bound = new Set(Object.values(this.map?.all?.() ?? {}));
-        const keepHours = Math.max(1, Number(config.conversation.cleanupKeepHours) || 24);
-        const candidates = cleanupCandidates(items, {
-          bound,
-          keepMs: keepHours * 3600_000,
-          cwd: config.conversation.cwd,
-        });
-        if (candidates.length === 0) {
-          await this.sendText(message, `没有可清理的会话（绑定 ${bound.size} 个，${keepHours} 小时内活跃的都保留）。`);
+        const outcome = await this.cleanupSessions({ dry: preview });
+        if (outcome.candidates.length === 0) {
+          await this.sendText(message, `没有可清理的会话（绑定 ${outcome.bound} 个，${outcome.keepHours} 小时内活跃的都保留）。`);
           return;
         }
         if (preview) {
-          const sample = candidates.slice(0, 8).map(item => `· ${item.title ?? item.id}`).join('\n');
-          await this.sendText(message, `预览：可清理 ${candidates.length} 个（未执行）\n${sample}\n发 /清理会话 执行。`);
+          const sample = outcome.candidates.slice(0, 8).map(item => `· ${item.title ?? item.id}`).join('\n');
+          await this.sendText(message, `预览：可清理 ${outcome.candidates.length} 个（未执行）\n${sample}\n发 /清理会话 执行。`);
           return;
         }
-        let archived = 0;
-        let failed = 0;
-        for (const item of candidates) {
-          try {
-            await this.archiveSession?.(item.id);
-            archived += 1;
-          } catch {
-            failed += 1;
-          }
-        }
         await this.sendText(message, [
-          `已清理 ${archived} 个会话${failed === 0 ? '' : `（${failed} 个失败）`}。`,
-          `保留：绑定中的 ${bound.size} 个 + ${keepHours} 小时内活跃的。文件没有删除，只是归档。`,
+          `已清理 ${outcome.archived} 个会话${outcome.failed === 0 ? '' : `（${outcome.failed} 个失败）`}。`,
+          `保留：绑定中的 ${outcome.bound} 个 + ${outcome.keepHours} 小时内活跃的。文件没有删除，只是归档。`,
         ].join('\n'));
         return;
       }
+
       case 'digest': {
         if (this.archive === null || this.archive === undefined) {
           await this.sendText(message, '档案不可用，出不了日报。');
@@ -1383,6 +1360,43 @@ export class Bridge {
     } catch (error) {
       this.log(`archive ${sessionId} failed: ${String(error?.message ?? error).slice(0, 100)}`);
     }
+  }
+
+  /**
+   * Archive sessions the bridge no longer needs.
+   *
+   * Keeps every bound session, anything running, anything touched inside the
+   * retention window and anything outside the bridge folder; the rest is
+   * archived (files stay on disk).
+   *
+   * @param {{ dry?: boolean }} [options] When dry, only count.
+   * @returns {Promise<{ keepHours: number, bound: number, candidates: Array<{ id: string, title?: string, updatedAt?: number }>, archived: number, failed: number, dry: boolean }>} Outcome.
+   */
+  async cleanupSessions(options = {}) {
+    const config = this.store.get();
+    const keepHours = Math.max(1, Number(config.conversation.cleanupKeepHours) || 24);
+    const items = extractSessions(await this.controller.list({}, AbortSignal.timeout(8000)));
+    const bound = Object.values(this.map?.all?.() ?? {});
+    const candidates = cleanupCandidates(items, {
+      bound: new Set(bound),
+      keepMs: keepHours * 3600_000,
+      cwd: config.conversation.cwd,
+    }).map(item => ({ id: item.id, title: item.title, updatedAt: item.updatedAt }));
+    if (options.dry === true) {
+      return { keepHours, bound: bound.length, candidates, archived: 0, failed: 0, dry: true };
+    }
+    let archived = 0;
+    let failed = 0;
+    for (const item of candidates) {
+      try {
+        await this.archiveSession?.(item.id);
+        archived += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    if (archived > 0) this.log(`archived ${archived} stale sessions`);
+    return { keepHours, bound: bound.length, candidates, archived, failed, dry: false };
   }
 
   async rebuildScene(scene, options = {}) {

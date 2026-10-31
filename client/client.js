@@ -842,6 +842,51 @@ window.__ModuleLoader__.load({
             h(Select, { value: route?.effort ?? '', options: effortOptions, onChange: next => onChange({ ...route, effort: next }) }))));
     };
 
+    /** Cleanup of stale bridge sessions, with an explicit preview step. */
+    const CleanupBox = () => {
+      const [preview, setPreview] = React.useState(null);
+      const [status, setStatus] = React.useState('');
+      const [busy, setBusy] = React.useState(false);
+      const load = () => getJson('/dsh-to-qq/api/sessions')
+        .then(setPreview)
+        .catch(reason => setStatus(`读取失败：${reason?.message ?? reason}`));
+      React.useEffect(() => { void load(); }, []);
+      const run = async () => {
+        setBusy(true);
+        setStatus('清理中…');
+        try {
+          const result = await postJson('/dsh-to-qq/api/sessions', {});
+          setStatus(`已清理 ${result.archived} 个会话${result.failed === 0 ? '' : `（${result.failed} 个失败）`}，保留绑定中的 ${result.bound} 个 + ${result.keepHours} 小时内活跃的`);
+          await load();
+        } catch (reason) {
+          setStatus(`清理失败：${reason?.message ?? reason}`);
+        } finally {
+          setBusy(false);
+        }
+      };
+      const count = preview?.candidates?.length ?? 0;
+      return h('div', { style: { borderTop: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))', paddingTop: 12, marginTop: 12 } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 12 } },
+          h('div', { style: { flex: 1, minWidth: 0 } },
+            h('div', { style: { fontSize: 12.5 } }, 'QQ 会话清理'),
+            h('div', { style: UI.muted },
+              preview === null
+                ? '读取中…'
+                : `可清理 ${count} 个（未绑定的旧会话；保留 ${preview.keepHours} 小时内活跃的、绑定中的 ${preview.bound} 个）`)),
+          h('button', { type: 'button', onClick: () => { setPreview(null); void load(); }, style: UI.ghost }, '刷新'),
+          h('button', {
+            type: 'button',
+            onClick: run,
+            disabled: busy || count === 0,
+            style: { ...UI.primary, opacity: busy || count === 0 ? 0.5 : 1 },
+          }, count === 0 ? '无可清理' : `清理 ${count} 个`)),
+        Array.isArray(preview?.candidates) && preview.candidates.length > 0
+          ? h('div', { style: { ...UI.muted, marginTop: 8, lineHeight: 1.7 } },
+            preview.candidates.slice(0, 12).map(item => h('div', { key: item.id }, `· ${item.title ?? item.id}`)))
+          : null,
+        status === '' ? null : h('div', { style: { ...UI.muted, marginTop: 8 } }, status));
+    };
+
     /** Archive size plus a manual cleanup button. */
     const ArchiveBox = () => {
       const [info, setInfo] = React.useState(null);
@@ -1291,7 +1336,8 @@ const StickerBoard = () => {
               fieldRow({ path: 'archive.retentionDays', label: '保留天数', type: 'number' }),
               fieldRow({ path: 'archive.mediaRetentionDays', label: '媒体保留天数', type: 'number' }),
               fieldRow({ path: 'archive.media', label: '把收到的图片存到本地', type: 'checkbox' }),
-              h(ArchiveBox, { key: 'archive' })),
+              h(ArchiveBox, { key: 'archive' }),
+              h(CleanupBox, { key: 'cleanup' })),
           ];
 
       const chip = (() => {
