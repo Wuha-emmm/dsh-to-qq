@@ -38,7 +38,7 @@ import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.56.1';
+const VERSION = '0.56.2';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -182,6 +182,22 @@ export function apply(ctx) {
   };
 
   void map.load().catch(error => log(`session map load failed: ${error.message}`));
+
+  // QQ sessions are created in conversation.cwd. Registering that folder as a
+  // workspace keeps them grouped in the sidebar instead of looking like
+  // stray sessions that multiply on every rebuild.
+  const ensureBridgeWorkspace = async () => {
+    const cwd = store.get().conversation.cwd;
+    if (typeof cwd !== 'string' || cwd.trim() === '') return;
+    const registry = ctx.get('workspaceRegistry');
+    if (registry === undefined || typeof registry.create !== 'function') return;
+    const existing = await registry.resolveByPath?.(cwd).catch(() => undefined);
+    if (existing !== undefined) return;
+    const title = cwd.split(/[\\/]/).filter(Boolean).pop() ?? 'QQ';
+    await registry.create(cwd, title);
+    log(`workspace ${cwd} registered for QQ sessions`);
+  };
+  void ensureBridgeWorkspace().catch(error => log(`workspace registration failed: ${error?.message ?? error}`));
 
   const bridge = new Bridge({
     stickers,
@@ -994,6 +1010,7 @@ export function apply(ctx) {
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
 }
+
 
 
 

@@ -380,6 +380,10 @@ export class Bridge {
     /** Directory for rebuilds.json; empty disables persistence. */
     this.stateDir = options.stateDir ?? '';
     this.titledSessions = new Set();
+    /** Sessions created from a rebuild mark; their title says so. */
+    this.continuedSessions = new Set();
+    /** Scenes whose next session continues a rebuilt one. */
+    this.pendingContinue = new Set();
     /** group id -> display name, so a title costs one call. */
     this.groupNames = new Map();
     this.counters = { events: 0, messages: 0, deduped: 0, ignored: 0, throttled: 0, answered: 0, failed: 0, errors: 0 };
@@ -612,9 +616,10 @@ export class Bridge {
     if (this.titledSessions.has(sessionId)) return;
     this.titledSessions.add(sessionId);
     const title = await this.#sceneTitle(message);
+    const display = this.continuedSessions.has(sessionId) ? `${title} · 续` : title;
     try {
-      await this.driver.rename?.(sessionId, title);
-      this.log(`titled ${sessionId} as ${title}`);
+      await this.driver.rename?.(sessionId, display);
+      this.log(`titled ${sessionId} as ${display}`);
     } catch (error) {
       this.titledSessions.delete(sessionId);
       this.log(`rename ${sessionId} failed: ${String(error?.message ?? error).slice(0, 120)}`);
@@ -1117,6 +1122,7 @@ export class Bridge {
           injection.seen.add(entrySignature({ time: Number(row.time_unix) || 0, senderId: Number(row.sender_id) || 0, text: row.text ?? '' }));
         }
         seed = formatRecap(rows);
+        if (seed !== '') this.pendingContinue.add(message.scene);
       }
       const promptBase = tier === 'owner'
         ? this.#privatePrompt(message, config, card, quotedText)
@@ -1256,6 +1262,7 @@ export class Bridge {
           // While this turn runs, watch for questions the Host is waiting on.
           this.#startQuestionPoll(message, sessionId);
           // Name the session after the conversation, once per session.
+          if (this.pendingContinue.delete(message.scene)) this.continuedSessions.add(sessionId);
           void this.#titleSession(sessionId, message);
         },
       });
