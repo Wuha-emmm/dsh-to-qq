@@ -165,7 +165,53 @@ export async function bilibiliVideo(bvid, fetchImpl = fetch, cookie = '') {
       description: String(data.desc ?? ''),
       owner: String(data.owner?.name ?? ''),
       duration: Number(data.duration) || 0,
+      aid: Number(data.aid) || 0,
+      comments: Number(data.stat?.reply) || 0,
     };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Read the top comments of a video.
+ *
+ * The legacy `x/v2/reply` endpoint still answers without a WBI signature, which
+ * is what makes comments readable here at all.
+ *
+ * @param {number} aid Numeric video id from the view API.
+ * @param {{ limit?: number, sort?: number, cookie?: string, fetchImpl?: typeof fetch }} [options] Wiring.
+ * @returns {Promise<{ total: number, items: Array<{ user: string, like: number, text: string }> } | undefined>} Comments.
+ */
+export async function bilibiliComments(aid, options = {}) {
+  const id = Number(aid) || 0;
+  if (id <= 0) return undefined;
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const limit = Math.min(20, Math.max(1, Number(options.limit) || 10));
+  const sort = Number(options.sort) === 0 ? 0 : 2;
+  const cookie = typeof options.cookie === 'string' ? options.cookie : '';
+  try {
+    const response = await fetchImpl(
+      `https://api.bilibili.com/x/v2/reply?type=1&oid=${id}&sort=${sort}&ps=${limit}&pn=1`,
+      {
+        headers: {
+          'user-agent': USER_AGENT,
+          referer: `https://www.bilibili.com/video/av${id}`,
+          accept: 'application/json',
+          ...(cookie === '' ? {} : { cookie }),
+        },
+        signal: AbortSignal.timeout(8000),
+      },
+    );
+    const payload = await response.json();
+    if (Number(payload?.code) !== 0) return undefined;
+    const replies = Array.isArray(payload?.data?.replies) ? payload.data.replies : [];
+    const items = replies.slice(0, limit).map(reply => ({
+      user: String(reply?.member?.uname ?? ''),
+      like: Number(reply?.like) || 0,
+      text: String(reply?.content?.message ?? '').replace(/\s+/g, ' ').slice(0, 200),
+    })).filter(item => item.text !== '');
+    return { total: Number(payload?.data?.page?.acount) || items.length, items };
   } catch {
     return undefined;
   }
@@ -185,7 +231,7 @@ export function bvidOf(url) {
  * Fetch one page and describe it.
  *
  * @param {string} rawUrl URL the model asked for.
- * @param {{ fetchImpl?: typeof fetch, maxChars?: number }} [options] Wiring.
+ * @param {{ fetchImpl?: typeof fetch, maxChars?: number, comments?: number, cookieFor?: (url: string) => string }} [options] Wiring.
  * @returns {Promise<{ url: string, title: string, description: string, text: string, report: string }>} Page facts.
  * @throws {Error} When the URL is refused or the request fails.
  */
@@ -194,6 +240,7 @@ export async function fetchPage(rawUrl, options = {}) {
   if (checked.error !== undefined) throw new Error(checked.error);
   const fetchImpl = options.fetchImpl ?? fetch;
   const maxChars = Math.max(200, Number(options.maxChars) || 4000);
+  const commentLimit = Math.min(20, Math.max(0, Number(options.comments) || 0));
   const resolved = await resolveShortLink(checked.url, fetchImpl);
   // A logged-in provider sends its cookie along, which is the whole point of the
   // optional account: some pages only render for a signed-in visitor.
@@ -206,6 +253,16 @@ export async function fetchPage(rawUrl, options = {}) {
       const lines = [`B站视频：${video.title}`];
       if (video.owner !== '') lines.push(`UP主：${video.owner}`);
       if (video.description !== '') lines.push(`简介：${video.description.slice(0, 300)}`);
+      if (video.comments > 0) lines.push(`评论数：${video.comments}`);
+      if (commentLimit > 0) {
+        const comments = await bilibiliComments(video.aid, { limit: commentLimit, cookie, fetchImpl });
+        if (comments !== undefined && comments.items.length > 0) {
+          lines.push(`热评（共 ${comments.total} 条，取前 ${comments.items.length} 条）：`);
+          for (const [index, comment] of comments.items.entries()) {
+            lines.push(`${index + 1}. ${comment.user === '' ? '匿名' : comment.user}（赞 ${comment.like}）：${comment.text}`);
+          }
+        }
+      }
       lines.push(`链接：${resolved}`);
       const report = lines.join('\n');
       return { url: resolved, title: video.title, description: video.description, text: report, report };

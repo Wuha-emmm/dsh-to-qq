@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkUrl, isPrivateHost, readPageMeta, bvidOf, resolveShortLink, fetchPage } from '../src/media/page.js';
+import { checkUrl, isPrivateHost, readPageMeta, bvidOf, resolveShortLink, fetchPage, bilibiliComments } from '../src/media/page.js';
 
 test('the fetcher refuses localhost and private networks', () => {
   for (const url of ['http://127.0.0.1:3000/get_status', 'http://localhost/x', 'http://10.1.2.3/', 'http://192.168.1.1/', 'http://172.16.0.1/', 'http://169.254.1.1/', 'http://[::1]/']) {
@@ -70,4 +70,40 @@ test('an ordinary page returns its title and text', async () => {
 test('an HTTP error surfaces as a thrown error', async () => {
   const fakeFetch = async () => ({ url: 'https://example.com/403', ok: false, status: 403, headers: new Map() });
   await assert.rejects(() => fetchPage('https://example.com/403', { fetchImpl: fakeFetch }), /HTTP 403/);
+});
+
+test('top comments are read from the reply API', async () => {
+  const fakeFetch = async url => {
+    assert.match(String(url), /x\/v2\/reply\?type=1&oid=123/);
+    return { json: async () => ({ code: 0, data: { page: { acount: 42 }, replies: [
+      { member: { uname: '甲' }, like: 99, content: { message: '好看' } },
+      { member: { uname: '乙' }, like: 1, content: { message: '' } },
+    ] } }) };
+  };
+  const result = await bilibiliComments(123, { limit: 5, fetchImpl: fakeFetch });
+  assert.equal(result.total, 42);
+  assert.deepEqual(result.items, [{ user: '甲', like: 99, text: '好看' }]);
+});
+
+test('a video report can include comments', async () => {
+  const fakeFetch = async url => {
+    if (String(url).includes('x/v2/reply')) {
+      return { json: async () => ({ code: 0, data: { page: { acount: 1 }, replies: [{ member: { uname: '甲' }, like: 2, content: { message: '热评内容' } }] } }) };
+    }
+    return { ok: true, headers: new Map(), json: async () => ({ code: 0, data: { title: '标题', desc: '', owner: { name: 'UP' }, aid: 123, stat: { reply: 1 } } }) };
+  };
+  const page = await fetchPage('https://www.bilibili.com/video/BV1xx411c7mD', { fetchImpl: fakeFetch, comments: 3 });
+  assert.match(page.report, /评论数：1/);
+  assert.match(page.report, /热评内容/);
+});
+
+test('comments stay out of the report unless asked', async () => {
+  let replyCalls = 0;
+  const fakeFetch = async url => {
+    if (String(url).includes('x/v2/reply')) { replyCalls += 1; return { json: async () => ({ code: 0, data: {} }) }; }
+    return { ok: true, headers: new Map(), json: async () => ({ code: 0, data: { title: '标题', desc: '', owner: { name: 'UP' }, aid: 123, stat: { reply: 9 } } }) };
+  };
+  const page = await fetchPage('https://www.bilibili.com/video/BV1xx411c7mD', { fetchImpl: fakeFetch });
+  assert.equal(replyCalls, 0);
+  assert.match(page.report, /评论数：9/);
 });

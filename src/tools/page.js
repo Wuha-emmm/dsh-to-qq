@@ -21,12 +21,13 @@ export function registerPageTool(ctx, options = {}) {
   return ctx.tools.register({
     name: 'fetch_page',
     description:
-      'Read a web page or link the way a browser does: resolves short links (b23.tv, t.cn, youtu.be, v.douyin.com, xhslink.com) and sends browser headers so Bilibili and similar anti-bot sites answer instead of blocking. Use it when web_fetch fails, or when the person shares a Bilibili video, a short link, or a news card. Localhost and private network addresses are refused.',
+      'Read a web page or link the way a browser does: resolves short links (b23.tv, t.cn, youtu.be, v.douyin.com, xhslink.com) and sends browser headers so Bilibili and similar anti-bot sites answer instead of blocking. For a Bilibili video it can also read the top comments (pass comments: 10). Use it when web_fetch fails, or when the person shares a Bilibili video, a short link, or a news card. Localhost and private network addresses are refused.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         url: { type: 'string', description: 'Page URL, including short links.' },
+        comments: { type: 'number', description: 'For a Bilibili video, how many top comments to include (0-20, default 0).' },
         max_chars: { type: 'number', description: 'How much page text to keep; default 4000.' },
       },
       required: ['url'],
@@ -40,6 +41,7 @@ export function registerPageTool(ctx, options = {}) {
       if (url === '') throw new Error('url is required');
       const page = await fetchPage(url, {
         maxChars: Number(args.max_chars) || 4000,
+        comments: Number(args.comments) || 0,
         cookieFor: options.cookieFor,
       });
       log(`fetched ${page.url}`);
