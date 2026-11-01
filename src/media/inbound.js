@@ -10,7 +10,6 @@
 const ACCEPTED = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
 import { composeGifSheet } from './gif.js';
-import { shrinkBytes } from './shrink.js';
 
 /** How many images one prompt may carry when the host advertises no policy. */
 /** Refuse oversized downloads: a huge image would be base64-inlined into the prompt. */
@@ -110,12 +109,12 @@ export async function promptImageParts(segments, log, limit = DEFAULT_MAX_IMAGES
           sheets.push({ frames: sheet.frames, total: sheet.total });
         }
       }
-      // A phone screenshot costs four times the prompt of a 1280-wide copy.
-      const smaller = await shrinkBytes(shaped.data, shaped.mediaType, { log });
+      // Keep the original pixels: the model only reads a picture when it needs the
+      // detail, and shrinking here would cost exactly that detail.
       parts.push({
         type: 'image',
-        data: Buffer.from(smaller).toString('base64'),
-        mediaType: smaller === shaped.data ? shaped.mediaType : 'image/png',
+        data: Buffer.from(shaped.data).toString('base64'),
+        mediaType: shaped.mediaType,
         ...(image.name === undefined ? {} : { name: image.name }),
       });
     } catch (error) {

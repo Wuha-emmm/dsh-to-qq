@@ -114,30 +114,3 @@ export async function shrinkFile(input, options = {}) {
     return { path: source, bytes: info.size, shrunk: false, ...(size ?? {}) };
   }
 }
-
-/**
- * Shrink image bytes for prompt admission.
- *
- * @param {Uint8Array} bytes Downloaded bytes.
- * @param {string} mediaType Source media type.
- * @param {{ maxEdge?: number, log?: (line: string) => void }} [options] Wiring.
- * @returns {Promise<Uint8Array>} Smaller bytes, or the original when not worth it.
- */
-export async function shrinkBytes(bytes, mediaType, options = {}) {
-  if (!shouldShrink(bytes, options.maxEdge)) return bytes;
-  const directory = await mkdtemp(join(tmpdir(), 'dsh-to-qq-inbound-'));
-  const source = join(directory, mediaType === 'image/jpeg' ? 'source.jpg' : 'source.png');
-  const output = join(directory, 'small.png');
-  try {
-    await writeFile(source, bytes);
-    await runResize(source, output, Math.max(320, Math.min(2048, Number(options.maxEdge) || DEFAULT_MAX_EDGE)), 20_000);
-    const shrunk = new Uint8Array(await readFile(output));
-    options.log?.(`inbound image ${Math.round(bytes.length / 1024)}KB → ${Math.round(shrunk.length / 1024)}KB`);
-    return shrunk;
-  } catch (error) {
-    options.log?.(`inbound shrink failed, keeping the original: ${error?.message ?? error}`);
-    return bytes;
-  } finally {
-    await rm(directory, { recursive: true, force: true }).catch(() => {});
-  }
-}

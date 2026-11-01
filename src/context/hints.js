@@ -36,10 +36,10 @@ export const HINTS = [
     text: () => '【发图发文件只用 qq_send】不要用 pwsh 调 OneBot/SnowLuma 的发送接口；qq_send 在界面发起的回合里也能用（会自动找回 QQ 场景）。',
   },
   {
-    id: 'shrink',
+    id: 'screenshot',
     tiers: ['owner'],
-    tools: ['shrink_image'],
-    text: () => '【看图先缩图】读截图前先调 shrink_image 拿小图路径，再用 read_image 读它；read_image 按像素计费，2560 宽的截图是 1280 宽的四倍。小字看不清再读原图。',
+    tools: ['qq_send'],
+    text: () => '【截图】对方要截图时，截完直接用 qq_send 发图，不要先 read_image，也不要写说明——他要的就是图。只有你需要靠画面决定下一步（点哪里、数字是多少）时才读；真要读就读原图，清晰度优先，只有单纯看整体版式才用 shrink_image。',
   },
   {
     id: 'no-repeat',
