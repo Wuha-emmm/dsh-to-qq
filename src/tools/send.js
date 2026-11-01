@@ -8,7 +8,9 @@
  *     picture and the conclusion arrive as one message instead of two.
  */
 
+import { stat } from 'node:fs/promises';
 import { captionOf } from '../bridge/outbox.js';
+import { compressForUpload } from '../media/compress.js';
 
 const textSegment = text => ({ type: 'text', data: { text } });
 
@@ -70,12 +72,23 @@ export function registerQqSendTool(ctx, options) {
       const action = isGroup ? 'send_group_msg' : 'send_private_msg';
       const baseParams = isGroup ? { group_id: targetId } : { user_id: targetId };
 
+      // A 9 MB PNG takes seconds to upload; the same frame as JPEG is under 1 MB.
+      // The local original is untouched, so a later read_image still sees full detail.
+      let imagePath = wantsImage ? String(args.image) : '';
+      if (wantsImage && !/^(https?:\/\/|base64:\/\/)/i.test(imagePath)) {
+        const info = await stat(imagePath).catch(() => undefined);
+        if (info !== undefined) {
+          const upload = await compressForUpload(imagePath, { size: info.size, log: options.log });
+          imagePath = upload.path;
+        }
+      }
+
       const caption = captionOf(args.text);
       // A captioned picture is part of the answer: hold it for the reply.
       if ((wantsImage || wantsFile) && caption.text !== '') {
         bridge.queueMedia(context.scene, {
           caption: caption.text,
-          image: wantsImage ? String(args.image) : '',
+          image: imagePath,
           file: wantsFile ? String(args.file) : '',
         });
         options.log(`qq_send queued ${context.scene} (caption ${caption.text.length} chars)`);
@@ -89,7 +102,7 @@ export function registerQqSendTool(ctx, options) {
       /** @type {Array<{ type: string, data: Record<string, unknown> }>} */
       const segments = [];
       if (typeof args.text === 'string' && args.text.trim() !== '') segments.push(textSegment(args.text));
-      if (wantsImage) segments.push({ type: 'image', data: { file: toImageSource(args.image) } });
+      if (wantsImage) segments.push({ type: 'image', data: { file: toImageSource(imagePath) } });
 
       const sent = [];
       if (segments.length > 0) {
