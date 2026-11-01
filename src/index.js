@@ -46,7 +46,7 @@ import { rawSendRefusal } from './policy/raw-send.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.80.0';
+const VERSION = '0.81.0';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -342,7 +342,12 @@ export function apply(ctx) {
 // tier rules are skipped, and a file can be delivered twice.
 ctx.effect(() => ctx.tools.guard(execution => {
   if (execution?.name !== 'pwsh') return undefined;
-  return rawSendRefusal(String(execution?.arguments?.command ?? ''));
+  const refusal = rawSendRefusal(String(execution?.arguments?.command ?? ''));
+  if (refusal !== undefined) {
+    bridge.counters.rawSendBlocked = (bridge.counters.rawSendBlocked ?? 0) + 1;
+    log(`blocked a raw OneBot write (total ${bridge.counters.rawSendBlocked})`);
+  }
+  return refusal;
 }));
 
 // Dangerous tools called from a QQ session need an explicit `/yes` first.
@@ -1171,6 +1176,8 @@ ctx.effect(() => ctx.tools.guard(execution => {
         `sessions ${Object.keys(map.all()).length} buffered scenes ${snapshot.scenes}`,
         `events ${snapshot.counters.events} messages ${snapshot.counters.messages} deduped ${snapshot.counters.deduped}`,
         `ignored ${snapshot.counters.ignored} throttled ${snapshot.counters.throttled} answered ${snapshot.counters.answered} failed ${snapshot.counters.failed} errors ${snapshot.counters.errors}`,
+        `raw sends blocked ${bridge.counters.rawSendBlocked ?? 0}`,
+
         `quota day ${bridge.quota.snapshot().day} senders ${bridge.quota.snapshot().senders} scenes ${bridge.quota.snapshot().scenes}${bridge.quota.dirty ? " (unsaved)" : ""}`,
         `bot ${bridge.selfId === 0 ? "(unknown)" : bridge.selfId}${bridge.selfId === 0 ? "" : " (pinned)"}`,
         `context last ${bridge.contextStats?.chars ?? 0} chars (saved ${bridge.contextStats?.skipped ?? 0})`,
@@ -1235,6 +1242,7 @@ ctx.effect(() => ctx.tools.guard(execution => {
     log,
   }));
 }
+
 
 
 

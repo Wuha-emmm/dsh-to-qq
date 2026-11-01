@@ -213,8 +213,8 @@ WBI 签名：从 `nav` 取 `wbi_img` 两个 key，按固定置换表混成 32 �
 | `qq_send({ image, text })` | **入队**，回合末与正文合并成一条（`mergeText`：有正文用正文，没正文用 caption） |
 | caption 超过 30 字 | 截断成 30 字 + 省略号，返回值提示“剩下的写进正文” |
 
-合并时图片最多 4 张同一条，多余的与文件各自单独发。失败路径也会 flush，图不会卡在队列里。`qq_send` 现在同时写入档案，之前它发出的内容完全不入档。
+合并时图片最多 4 张同一条，多余的与文件各自单独发。**失败路径会先把队列冲刷出去再报错**（图是已经产出的东西，不该丢，也不该留到下一轮变成“旧图”）；队列项带时间戳，超过 5 分钟的直接丢弃（`pruneQueue`），任何漏网的路径都不会把旧截图带进新回合。`qq_send` 现在同时写入档案，之前它发出的内容完全不入档。
 
-**不允许绕路**：`pwsh` 里出现 `send_private_msg` / `send_group_msg` / `upload_private_file` / `upload_group_file` 会被 guard 直接拒绝并提示改用 `qq_send`。这条是 08:00 那次“两张图”的根因：模型先 `upload_private_file`（已投递一次），再 `send_private_msg` 带同一文件（又投递一次），两个文件名不同、内容相同。
+**不允许绕路**：`pwsh` 里出现写类接口（`send_*` / `upload_*` / `set_*_add_request`，或任何 `:端口/send_` 路径）会被 guard 拒绝并提示改用 `qq_send`；读取类接口（`get_status` 等）不受影响。被拒次数记在 `qq_status` 的 `raw sends blocked` 一行。这是护栏，不是安全边界：拼接 URL 或脚本文件仍能绕过。这条是 08:00 那次“两张图”的根因：模型先 `upload_private_file`（已投递一次），再 `send_private_msg` 带同一文件（又投递一次），两个文件名不同、内容相同。
 
 面板里发起的回合此前 `qq_send` 报 “not bound”：`sessionContext` 查不到时现在会按 `sessions.json` 的绑定反查场景并缓存，所以界面里也能正常发图。

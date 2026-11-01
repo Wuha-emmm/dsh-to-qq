@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { captionOf, mergeText, CAPTION_LIMIT } from '../src/bridge/outbox.js';
+import { captionOf, mergeText, pruneQueue, CAPTION_LIMIT, MEDIA_TTL_MS } from '../src/bridge/outbox.js';
 
 test('a short caption is kept as a label', () => {
   const short = '到主菜单了，烽火地带那一屏';
@@ -29,4 +29,16 @@ test('without a reply the captions are the message', () => {
   assert.equal(mergeText('', ['特勤处', '下一步点这里']), '特勤处 下一步点这里');
   assert.equal(mergeText('   ', ['只有一条']), '只有一条');
   assert.equal(mergeText('', []), '');
+});
+
+test('a stale queued picture is dropped instead of leaking into a later turn', () => {
+  const now = 5_000_000;
+  const items = [
+    { caption: '旧图', at: now - MEDIA_TTL_MS - 1 },
+    { caption: '新图', at: now - 1000 },
+    { caption: '没有时间戳' },
+  ];
+  const { fresh, stale } = pruneQueue(items, now);
+  assert.deepEqual(stale.map(item => item.caption), ['旧图']);
+  assert.deepEqual(fresh.map(item => item.caption), ['新图', '没有时间戳']);
 });

@@ -44,3 +44,28 @@ export function mergeText(reply, captions) {
     .filter(caption => caption !== '')
     .join(' ');
 }
+
+/** How long a queued picture stays valid; older items are dropped. */
+export const MEDIA_TTL_MS = 5 * 60_000;
+
+/**
+ * Split a queue into fresh and stale items.
+ *
+ * A turn that fails after queueing must not leak its picture into a later turn,
+ * and any path that forgets to flush still cannot resurrect an old screenshot.
+ *
+ * @param {ReadonlyArray<{ at?: number }>} items Queued items.
+ * @param {number} [now] Epoch milliseconds.
+ * @param {number} [ttlMs] Maximum age.
+ * @returns {{ fresh: any[], stale: any[] }} Partition.
+ */
+export function pruneQueue(items, now = Date.now(), ttlMs = MEDIA_TTL_MS) {
+  const fresh = [];
+  const stale = [];
+  for (const item of Array.isArray(items) ? items : []) {
+    const at = Number(item?.at) || 0;
+    if (at > 0 && now - at > ttlMs) stale.push(item);
+    else fresh.push(item);
+  }
+  return { fresh, stale };
+}

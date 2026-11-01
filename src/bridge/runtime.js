@@ -12,7 +12,7 @@ import { normalizeEvent, chunkText, flattenSegments } from './events.js';
 import { normalizeRequestEvent, describeRequest } from './requests.js';
 import { buildReplySegments, memberNames } from './mentions.js';
 import { shouldSendNotice } from './notice.js';
-import { mergeText } from './outbox.js';
+import { mergeText, pruneQueue } from './outbox.js';
 import { buildHints } from '../context/hints.js';
 import { TIER_TOOLS } from '../policy/restrictions.js';
 import { toImageSource } from '../tools/send.js';
@@ -1420,6 +1420,9 @@ export class Bridge {
       this.counters.failed += 1;
       this.log(`turn failed for ${message.scene}: ${error?.message ?? error}`);
       void this.pet?.workStatus('error');
+      // The picture was already produced; deliver it rather than dropping it into
+      // the next turn, where it would look like a stray screenshot.
+      await this.#flushMedia(message, '').catch(flushError => this.log(`media flush failed after error: ${flushError?.message ?? flushError}`));
       await this.sendText(message, `我这边出错了：${String(error?.message ?? error).slice(0, 200)}`);
     } finally {
       this.archive?.insertTurn({
@@ -2035,7 +2038,7 @@ export class Bridge {
    */
   queueMedia(scene, item) {
     const list = this.mediaQueue.get(scene) ?? [];
-    list.push(item);
+    list.push({ ...item, at: Date.now() });
     this.mediaQueue.set(scene, list);
   }
 
@@ -2047,9 +2050,12 @@ export class Bridge {
    * @returns {Promise<boolean>} True when something was sent.
    */
   async #flushMedia(message, reply) {
-    const items = this.mediaQueue.get(message.scene) ?? [];
-    if (items.length === 0) return false;
+    const queued = this.mediaQueue.get(message.scene) ?? [];
+    if (queued.length === 0) return false;
     this.mediaQueue.delete(message.scene);
+    const { fresh: items, stale } = pruneQueue(queued);
+    if (stale.length > 0) this.log(`dropped ${stale.length} stale media item(s) for ${message.scene}`);
+    if (items.length === 0) return false;
     const text = mergeText(reply, items.map(item => item.caption));
     const images = items.filter(item => item.image !== '');
     const files = items.filter(item => item.file !== '');

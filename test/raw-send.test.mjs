@@ -9,6 +9,9 @@ test('a shell command that posts to OneBot is refused', () => {
     'curl -X POST http://127.0.0.1:3000/upload_private_file',
     'Invoke-RestMethod http://127.0.0.1:3000/send_group_msg',
     'Invoke-RestMethod http://127.0.0.1:3000/upload_group_file',
+    'Invoke-RestMethod http://127.0.0.1:3000/send_msg',
+    'Invoke-RestMethod http://127.0.0.1:3000/set_group_add_request',
+    'curl http://127.0.0.1:3999/send_private_msg',
   ]) {
     assert.equal(isRawSend(command), true, command);
     assert.match(rawSendRefusal(command), /qq_send/);
@@ -19,6 +22,7 @@ test('ordinary commands pass through', () => {
   for (const command of [
     'Get-Process wegame',
     'Invoke-RestMethod http://127.0.0.1:3000/get_status',
+    'Invoke-RestMethod http://127.0.0.1:3000/get_group_info',
     "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{TAB}')",
   ]) {
     assert.equal(isRawSend(command), false, command);
