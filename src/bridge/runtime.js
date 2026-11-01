@@ -13,6 +13,8 @@ import { normalizeRequestEvent, describeRequest } from './requests.js';
 import { buildReplySegments, memberNames } from './mentions.js';
 import { shouldSendNotice } from './notice.js';
 import { mergeText } from './outbox.js';
+import { buildHints } from '../context/hints.js';
+import { TIER_TOOLS } from '../policy/restrictions.js';
 import { toImageSource } from '../tools/send.js';
 import { admit, blockedWord, tierOf } from '../policy/tiers.js';
 import { Quota, Semaphore } from '../policy/quota.js';
@@ -1316,9 +1318,10 @@ export class Bridge {
         ? Number(config.output.replyCharsOwner) || 0
         : Number(config.output.replyCharsGroup) || 0;
       const lengthLimit = tierLimit > 0 ? tierLimit : baseLimit;
-      const lengthNote = lengthLimit > 0
-        ? injection.fixed('length', `【回复长度】尽量控制在 ${lengthLimit} 字以内；内容较长时正常输出，我会自动转成图片发出去。【B站视频】要说明某个 B站视频讲了什么时，先调 bilibili 工具的 subtitle 动作读字幕（登录态已就绪）；拿不到字幕再用 web_fetch，别先下结论说看不到。【日报】要出日报就直接调 group_digest（day 传 today / yesterday / 前天 / YYYY-MM-DD），它两秒出图；不要用 qq_history 自己翻记录统计，那样要好几分钟。【别重复】长任务执行中只报一次进度；同一句话不要发第二遍；被授权拦住时只说"需要放行 X"，不要重述整段计划。授权一次默认 15 分钟内有效，够你把这事做完。【发图发文件只用 qq_send】不要用 pwsh 调 OneBot/SnowLuma 的发送接口；qq_send 在界面发起的回合里也能用（会自动找回 QQ 场景）。`)
-        : '';
+      // Only mention the tools this tier can actually call.
+      const hintTools = tier === 'owner' ? '*' : (TIER_TOOLS[tier] ?? []);
+      const hintText = buildHints({ tier, tools: hintTools, lengthLimit });
+      const lengthNote = hintText === '' ? '' : injection.fixed('length', hintText);
       const bodyText = `${promptBase}${imageNote}${voiceNote}${fileNote}${forwardNote}${stickerNote}${lengthNote}${nudge}`;
       const text = seed === undefined ? bodyText : `${seed}\n\n${bodyText}`;
       this.contextStats = { chars: text.length, ...injection.stats };

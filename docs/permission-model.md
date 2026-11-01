@@ -32,7 +32,7 @@
 |---|---|---|---|---|
 | `read` / `glob` / `grep` / `read_image` | ✅ | ❌ | ❌ | ❌ |
 | `write` / `edit` / `pwsh` / `plugin_manager` | ✅ | ❌ | ❌ | ❌ |
-| `web_search` / `web_fetch` / `fetch_page` | ✅ | ✅ | ✅ | ✅ |
+| `web_search` / `web_fetch`（含浏览器级抓取） | ✅ | ✅ | ✅ | ✅ |
 | `qq_send`（附件仅 owner） | ✅ | ✅ | ✅ | ✅ |
 | `qq_history` | ✅ | ✅ | ❌ | ❌ |
 | `memory_card_get` / `memory_note` / `memory_persona_set` / `memory_card_clear` / `memory_card_send` | ✅ | ✅ | ✅ | ✅ |

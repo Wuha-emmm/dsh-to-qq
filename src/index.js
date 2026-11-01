@@ -22,7 +22,7 @@ import { StickerStore } from './stickers/store.js';
 import { describePrompt, parseAnalysis, DESCRIBE_SYSTEM } from './stickers/describe.js';
 import { registerStickerTool } from './tools/stickers.js';
 import { registerEmojiTool } from './tools/emoji.js';
-import { registerPageTool } from './tools/page.js';
+import { createFetchProvider } from './web/provider.js';
 import { registerBilibiliTool } from './tools/bilibili.js';
 import { AccountStore } from './accounts/store.js';
 import { verifyLogin } from './accounts/bilibili.js';
@@ -45,7 +45,7 @@ import { rawSendRefusal } from './policy/raw-send.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.78.1';
+const VERSION = '0.79.0';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -1220,7 +1220,11 @@ ctx.effect(() => ctx.tools.guard(execution => {
   // Stickers: the model picks from the account's own 收藏表情.
   ctx.effect(() => registerStickerTool(ctx, { bridge, log }));
   ctx.effect(() => registerEmojiTool(ctx, { bridge, log }));
-  ctx.effect(() => registerPageTool(ctx, { log, cookieFor: url => accounts.cookieFor(url) }));
+  // web_fetch is DSH's tool; the plugin only contributes the transport behind it.
+  const web = ctx.get('web');
+  if (typeof web?.registerFetchProvider === 'function') {
+    ctx.effect(() => web.registerFetchProvider(createFetchProvider({ log, cookieFor: url => accounts.cookieFor(url) })));
+  }
   ctx.effect(() => registerBilibiliTool(ctx, {
     accounts,
     profileDir: browserProfile,
@@ -1229,6 +1233,7 @@ ctx.effect(() => ctx.tools.guard(execution => {
     log,
   }));
 }
+
 
 
 

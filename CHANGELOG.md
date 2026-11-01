@@ -2,6 +2,9 @@
 
 只记「改了什么」，一句话一条。
 
+## 0.79.x
+- **0.79.0** 规矩按档位发（好友私聊不再被要求用日报/B站工具）；`fetch_page` 工具并入 DSH 的 `web_fetch`（注册 `browser-fetch` provider），工具从 13 个降到 12 个
+
 ## 0.78.x
 - **0.78.1** 堵住绕过桥的发送：`pwsh` 里出现 `send_private_msg`/`upload_private_file` 等直接拒绝；界面发起的回合也能用 `qq_send`（按绑定反查场景）
 
