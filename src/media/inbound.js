@@ -110,10 +110,12 @@ export async function promptImageParts(segments, log, limit = DEFAULT_MAX_IMAGES
           sheets.push({ frames: sheet.frames, total: sheet.total });
         }
       }
+      // A phone screenshot costs four times the prompt of a 1280-wide copy.
+      const smaller = await shrinkBytes(shaped.data, shaped.mediaType, { log });
       parts.push({
         type: 'image',
-        data: Buffer.from(shaped.data).toString('base64'),
-        mediaType: shaped.mediaType,
+        data: Buffer.from(smaller).toString('base64'),
+        mediaType: smaller === shaped.data ? shaped.mediaType : 'image/png',
         ...(image.name === undefined ? {} : { name: image.name }),
       });
     } catch (error) {
