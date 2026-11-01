@@ -17,6 +17,7 @@ export const TIER_TOOLS = {
   'owner-group': [
     'web_search',
     'web_fetch',
+    'bilibili_read',
     'qq_send',
     'qq_history',
     'group_digest',
@@ -32,6 +33,7 @@ export const TIER_TOOLS = {
   member: [
     'web_search',
     'web_fetch',
+    'bilibili_read',
     'qq_send',
     'memory_card_send',
     'memory_card_get',
@@ -44,6 +46,7 @@ export const TIER_TOOLS = {
   'member-group': [
     'web_search',
     'web_fetch',
+    'bilibili_read',
     'qq_send',
     'group_digest',
     'memory_card_send',

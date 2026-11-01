@@ -19,9 +19,9 @@ export const HINTS = [
   },
   {
     id: 'bilibili',
-    tiers: ['owner'],
-    tools: ['bilibili'],
-    text: () => '【B站视频】要说明某个 B站视频讲了什么时，先调 bilibili 工具的 subtitle 动作读字幕（登录态已就绪）；拿不到字幕再用 web_fetch，别先下结论说看不到。',
+    tiers: '*',
+    tools: ['bilibili_read'],
+    text: () => '【B站视频】要知道某个 B站视频讲了什么，用 bilibili_read 工具的 subtitle 动作读字幕（登录态已就绪）；没有字幕再想别的办法，别先下结论说看不到。',
   },
   {
     id: 'digest',

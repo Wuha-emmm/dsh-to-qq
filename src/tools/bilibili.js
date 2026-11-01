@@ -14,12 +14,10 @@ import {
   postDynamic,
   reportHistory,
   searchVideos,
-  videoIds,
-  videoSubtitles,
 } from '../accounts/bilibili-api.js';
 
 /** Actions the tool accepts. */
-const ACTIONS = ['search', 'open', 'comment', 'dynamic', 'history', 'watch', 'subtitle'];
+const ACTIONS = ['search', 'open', 'comment', 'dynamic', 'history', 'watch'];
 
 /**
  * Resolve a video id and numeric aid from a bvid or URL.
@@ -75,7 +73,7 @@ export function registerBilibiliTool(ctx, options) {
   return ctx.tools.register({
     name: 'bilibili',
     description:
-      'Act on Bilibili with the account signed in through the 登录 tab. To read what a video says, use action "subtitle" first: it returns the captions (AI captions included) and is far cheaper than fetching the page or guessing from comments/danmaku. Actions: "search" a keyword in a real browser tab (so it lands in the account history) and return the top videos; "open" a video/URL in that browser; "subtitle" read what a video says through its captions (cheapest way to know the content); "comment" on a video; "dynamic" publish a plain-text dynamic; "history" mark a video as watched; "watch" play it muted so Bilibili may record it. For a mention pass mention as the Bilibili uid: a bare @name in the text links to whoever happens to own that nickname, which is usually not the person meant. Writing needs the cookie; risk control may refuse with its own message.',
+      'Act on Bilibili with the account signed in through the 登录 tab. Actions: "search" a keyword in a real browser tab (so it lands in the account history) and return the top videos; "open" a video/URL in that browser; "comment" on a video (mention: uid to @ the right person); "dynamic" publish a plain-text dynamic; "history" mark a video as watched; "watch" play it muted so Bilibili may record it. To read what a video says use the bilibili_read tool instead. Writing needs the cookie; risk control may refuse with its own message.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -84,7 +82,6 @@ export function registerBilibiliTool(ctx, options) {
         query: { type: 'string', description: 'Search keyword (action search).' },
         target: { type: 'string', description: 'Video bvid/URL or page URL (open/comment/history).' },
         message: { type: 'string', description: 'Comment text, or dynamic text.' },
-        max_chars: { type: 'number', description: 'For subtitle: how much transcript text to return (default 3000).' },
         mention: { type: 'string', description: 'Bilibili uid (e.g. 10217007) to @ in the comment. A QQ nickname or a bare @text does not notify anyone.' },
       },
       required: ['action'],
@@ -145,29 +142,6 @@ export function registerBilibiliTool(ctx, options) {
         const result = await postDynamic({ text: String(args.message ?? ''), cookie: jar });
         log(`bilibili dynamic: ${result.ok ? 'ok' : result.message}`);
         return { report: result.ok ? result.message : `发动态失败：${result.message}` };
-      }
-      if (action === 'subtitle') {
-        const video = await resolveVideo(args.target, { cookieFor });
-        if (video === undefined) throw new Error('给一个 bvid（BV…）或视频链接');
-        const ids = await videoIds({ bvid: video.bvid, aid: video.aid, cookie: jar });
-        if (ids === undefined) throw new Error('拿不到这个视频的 aid/cid');
-        const subs = await videoSubtitles({ aid: ids.aid, cid: ids.cid, bvid: video.bvid, cookie: jar });
-        if (subs === undefined) {
-          return { report: `《${ids.title || video.bvid}》没有字幕（人工和 AI 都没有），这条路走不通，只能转写音频` };
-        }
-        const limit = Math.max(200, Number(args.max_chars) || 3000);
-        const body = subs.text.length > limit ? `${subs.text.slice(0, limit)}…（共 ${subs.chars} 字，已截断）` : subs.text;
-        log(`bilibili subtitle ${video.bvid}: ${subs.lines.length} lines, ${subs.chars} chars`);
-        return {
-          report: [
-            `《${ids.title || video.bvid}》${subs.lanDoc || subs.lan}字幕，${subs.lines.length} 句 / ${subs.chars} 字`,
-            subs.lan.startsWith('ai') ? '（AI 字幕，可能有错字）' : '',
-            '',
-            body,
-          ].filter(line => line !== '').join('\n'),
-          chars: subs.chars,
-          lines: subs.lines.length,
-        };
       }
       if (action === 'watch') {
         const raw = String(args.target ?? '').trim();

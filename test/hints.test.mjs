@@ -6,8 +6,8 @@ import { TIER_TOOLS } from '../src/policy/restrictions.js';
 test('a friend DM is not told about tools it cannot call', () => {
   const hints = buildHints({ tier: 'member', tools: TIER_TOOLS.member, lengthLimit: 300 });
   assert.doesNotMatch(hints, /group_digest/);
-  assert.doesNotMatch(hints, /bilibili/);
-  assert.doesNotMatch(hints, /subtitle/);
+  // The read-only B站 tool is available to this tier and is advertised.
+  assert.match(hints, /bilibili_read/);
   // What it does have is still explained.
   assert.match(hints, /qq_send/);
   assert.match(hints, /回复长度/);
@@ -20,10 +20,12 @@ test('the owner gets every hint', () => {
   }
 });
 
-test('a group owner gets the digest hint but not the B站 one', () => {
+test('a group owner gets both the digest and the read-only B站 hint', () => {
   const hints = buildHints({ tier: 'owner-group', tools: TIER_TOOLS['owner-group'], lengthLimit: 300 });
   assert.match(hints, /group_digest/);
-  assert.doesNotMatch(hints, /subtitle/);
+  assert.match(hints, /bilibili_read/);
+  // Writing actions are not described to a group.
+  assert.doesNotMatch(hints, /comment|dynamic/);
 });
 
 test('the length rule uses the configured limit', () => {
