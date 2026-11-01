@@ -4,7 +4,7 @@
 
 > Bridge between QQ and DeepSeek Harness. Owner DMs get full local access; group mentions stay read-only.
 
-`Node ≥ 22` · `MIT` · 零 npm 运行时依赖 · 单测 213 条
+`Node ≥ 22` · `MIT` · 零 npm 运行时依赖 · 单测 358 条
 
 ---
 
@@ -37,7 +37,9 @@ file:///<你的路径>/dsh-to-qq/dist/dsh-to-qq-<版本>.tgz
 | **卡片** | 分享卡片读出标题、正文、来源、链接（邀请进群还带群名群号） |
 | **网页** | `web_fetch` 走浏览器级抓取：带 UA/Referer、解析短链、B站走公开 API；本机与内网地址拒绝 |
 | **站点登录** | 设置 →「登录」：打开独立浏览器窗口手动登录 B站/小红书，读取登录态；也可粘贴 cookie |
-| **B站写入** | `bilibili` 工具（仅管理员）：搜视频（写进浏览器历史）、**抓字幕读内容**、发评论（按 uid @ 对人）、发动态、上报观看记录、静音播放 |
+| **B站读** | `bilibili_read`：读字幕 / 视频信息，**好友和群都能用**（字幕是公开数据，只需要登录态） |
+| **B站写** | `bilibili`（仅管理员）：搜视频、开页、发评论（按 uid @ 对人）、发动态、上报观看记录、静音播放 |
+| **省 token** | 截图按需读（`shrink_image` 手动缩）、卡片与大图发送前转 JPEG |
 | **@** | 群回复里的 `@名字` 转成真正的 at，被 @ 的人会收到提醒 |
 | **截图** | 带说明的截图并入本轮正文一起发，不再图文各发一遍 |
 | **语音** | QQ 原生转写优先，失败再走本地/命令 |
@@ -53,7 +55,7 @@ file:///<你的路径>/dsh-to-qq/dist/dsh-to-qq-<版本>.tgz
 | **用量** | 设置页「用量」：每轮 token、缓存命中率、按峰谷价估算的费用 |
 | **回复长度** | 可设上限（默认 250 字），超长回复自动转成图片 |
 
-设置页 7 个页签：连接 / 权限 / 对话 / 记忆 / 表情 / 模型 / 档案。
+设置页 9 个页签：连接 / 权限 / 对话 / 记忆 / 表情 / 模型 / 档案 / 登录 / 用量。
 
 ## 权限模型
 
@@ -85,8 +87,10 @@ Host 半边负责接入、判权、上下文、记忆、档案与工具；Client
 | [部署](docs/deploy.md) | SnowLuma、QQ 小号、token、验收清单 |
 | [配置参考](docs/configuration.md) | 全部配置项（自动生成） |
 | [表情包库](docs/stickers.md) | 同步、识图、手改、免打扰 |
-| [权限模型](docs/permission-model.md) | 三档权限与工具矩阵 |
-| [架构](docs/architecture.md) | 模块划分与数据流 |
+| [权限模型](docs/permission-model.md) | 四档权限、好友/陌生人、工具矩阵 |
+| [架构](docs/architecture.md) | 模块划分、数据流、上下文与媒体管线 |
+| [设置页规格](docs/settings-spec.md) | 九个页签各自管什么 |
+| [安全现状](docs/audit.md) | 信任边界与已知风险 |
 | [排障](docs/troubleshooting.md) | 常见故障与日志位置 |
 | [SnowLuma 备忘](docs/snowluma.md) | 端口、双 token、状态码 |
 | [SnowLuma API](docs/snowluma-api.md) | 离线 API 参考：调用约定 + 219 个 OneBot 动作索引 |
@@ -96,7 +100,7 @@ Host 半边负责接入、判权、上下文、记忆、档案与工具；Client
 ## 开发
 
 ```powershell
-npm test           # 213 条单测
+npm test           # 358 条单测
 npm run smoke      # 真调 apply()，抓前置引用/缺服务
 npm run rehearse   # 端到端：解码→判权→上下文→卡片渲染→鉴权
 npm run inventory  # 文件、工具、命令、路由、配置键盘点

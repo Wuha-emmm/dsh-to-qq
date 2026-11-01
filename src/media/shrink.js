@@ -8,11 +8,9 @@
  * matters.
  */
 
-import { readFile, stat, writeFile } from 'node:fs/promises';
-import { extname } from 'node:path';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { extname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { runResize } from './thumbnail.js';
 
 /** Longest edge kept by default; enough for UI text at normal zoom. */
@@ -42,7 +40,11 @@ export function imageSize(bytes) {
   // WEBP (VP8X / VP8 / VP8L): dimensions live in the first chunk.
   if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) {
     const format = String.fromCharCode(bytes[12], bytes[13], bytes[14], bytes[15]);
-    if (format === 'VP8X') return { width: 1 + view.getUint32(24, true), height: 1 + view.getUint32(27, true) };
+    // VP8X stores width-1 and height-1 as 24-bit little-endian values.
+    if (format === 'VP8X') {
+      const u24 = offset => bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16);
+      return { width: 1 + u24(24), height: 1 + u24(27) };
+    }
     if (format === 'VP8 ') {
       return { width: view.getUint16(26, true) & 0x3fff, height: view.getUint16(28, true) & 0x3fff };
     }

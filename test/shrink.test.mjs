@@ -41,3 +41,19 @@ test('an unknown format falls back to the byte heuristic', () => {
   assert.equal(shouldShrink(heavy), true);
   assert.equal(shouldShrink(light), false);
 });
+
+test('a WebP canvas size is read as a 24-bit value', () => {
+  const bytes = new Uint8Array(40);
+  bytes.set([0x52, 0x49, 0x46, 0x46], 0); // RIFF
+  bytes.set([0x56, 0x50, 0x38, 0x58], 12); // VP8X
+  // width - 1 = 1999, height - 1 = 1199, both 24-bit little endian
+  const width = 1999;
+  const height = 1199;
+  bytes[24] = width & 0xff;
+  bytes[25] = (width >> 8) & 0xff;
+  bytes[26] = (width >> 16) & 0xff;
+  bytes[27] = height & 0xff;
+  bytes[28] = (height >> 8) & 0xff;
+  bytes[29] = (height >> 16) & 0xff;
+  assert.deepEqual(imageSize(bytes), { width: 2000, height: 1200 });
+});

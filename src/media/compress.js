@@ -129,3 +129,23 @@ export async function compressPayload(payload, options = {}) {
     await rm(directory, { recursive: true, force: true }).catch(() => {});
   }
 }
+
+/** Folder prefix of a temporary upload copy. */
+const UPLOAD_DIR_PREFIX = 'dsh-to-qq-upload-';
+
+/**
+ * Delete the temporary folder of a compressed upload copy.
+ *
+ * `compressForUpload` writes the JPEG into a fresh temp folder; once the upload has
+ * finished that copy is dead weight, so the caller disposes it.
+ *
+ * @param {string} path Path returned by `compressForUpload`.
+ * @returns {Promise<void>} Resolves after the best-effort delete.
+ */
+export async function disposeUploadCopy(path) {
+  const normalized = String(path ?? '').replace(/\\/g, '/');
+  const index = normalized.lastIndexOf(UPLOAD_DIR_PREFIX);
+  if (index < 0) return;
+  const directory = normalized.slice(0, index) + normalized.slice(index).split('/')[0];
+  await rm(directory, { recursive: true, force: true }).catch(() => {});
+}

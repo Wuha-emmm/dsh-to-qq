@@ -13,7 +13,7 @@ import { normalizeRequestEvent, describeRequest } from './requests.js';
 import { buildReplySegments, memberNames } from './mentions.js';
 import { shouldSendNotice } from './notice.js';
 import { mergeText, pruneQueue } from './outbox.js';
-import { compressPayload } from '../media/compress.js';
+import { compressPayload, disposeUploadCopy } from '../media/compress.js';
 import { buildHints } from '../context/hints.js';
 import { TIER_TOOLS } from '../policy/restrictions.js';
 import { toImageSource } from '../tools/send.js';
@@ -25,13 +25,12 @@ import { InjectionTracker, entrySignature } from '../context/injection.js';
 import { formatRecap } from '../context/recap.js';
 import { renderCard } from '../memory/store.js';
 import { renderTextImageBase64 } from '../render/text-image.js';
-import { promptImageParts, persistImage, imageSegments, looksLikeSticker, downloadImage } from '../media/inbound.js';
+import { promptImageParts, persistImage, imageSegments, looksLikeSticker, downloadImage, detectMediaType } from '../media/inbound.js';
 import { describeQuestions, parseReply, extractPending } from './questions.js';
 import { parseCommand, formatSessionList, extractSessions, cleanupCandidates } from './commands.js';
 import { voiceSegments, transcribeVoice } from '../media/voice.js';
 import { fetchForwards } from '../media/forward.js';
 import { renderStickerBlock } from '../stickers/catalog.js';
-import { detectMediaType } from '../media/inbound.js';
 import { renderFaceList } from '../stickers/faces.js';
 import { saveThumbnail, readThumbnail } from '../media/thumbnail.js';
 import { wantsNoStickers, wantsStickers } from '../stickers/mute.js';
@@ -1809,7 +1808,9 @@ export class Bridge {
   #cardBlock(message, injection) {
     if (this.memory === undefined) return '';
     const card = this.memory.get(message.senderId);
-    return injection.fixed('card', renderCard({ card, name: message.senderName, qq: message.senderId }));
+    // Keyed by sender: a group scene carries one card per speaker, and a shared
+    // slot would re-send every card on every turn as speakers alternate.
+    return injection.fixed('card', renderCard({ card, name: message.senderName, qq: message.senderId }), message.senderId);
   }
 
   /**
@@ -1952,7 +1953,7 @@ export class Bridge {
     // other members said. Use it to understand the conversation, not to report it.
     const privacy = config.conversation.groupPrivacy === false
       ? ''
-      : injection.fixed('rules', '【群聊规则】上下文里其他成员的消息只用于理解你们在聊什么，不要复述、总结、转述或引用其中任何一句；被问到“别人说了什么”时，只回答你自己看到的本轮内容。回复里直接写 @名字 就会真的 @ 到对方（桥会把它转成真正的 @ 段），不要只写名字。');
+      : injection.fixed('rules', '【群聊规则】上下文里其他成员的消息只用于理解你们在聊什么，不要复述、总结、转述或引用其中任何一句；被问到“别人说了什么”时，只回答你自己看到的本轮内容。回复里直接写 @名字 就会真的 @ 到对方（桥会把它转成真正的 @ 段），不要只写名字。记忆卡按人区分：卡头写着名字和 QQ 号，只对卡上那个人生效，不要把它的人设或印象套到别人身上；你此刻在对话的是【当前提问】里那个名字和 QQ 号，其余卡只当背景。');
     const ask = `【当前提问】${message.senderName}(${message.senderId}): ${message.text === '' ? '（非文本消息）' : message.text}`;
     const parts = [card, block, privacy, ask].filter(part => part !== '');
     return parts.join('\n\n');
@@ -2086,6 +2087,7 @@ export class Bridge {
       await this.client.call(upload, { ...params, file: item.file, name }, { timeoutMs: 60_000 });
     }
     this.recordOutbound(message, text === '' ? '[图片]' : text, images.length > 0 ? 'image' : undefined);
+    for (const item of items) if (item.image !== '') await disposeUploadCopy(item.image);
     this.log(`media flushed with reply for ${message.scene} (${images.length} image(s), ${files.length} file(s))`);
     return true;
   }

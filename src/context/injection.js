@@ -38,7 +38,17 @@ export class InjectionTracker {
    */
   constructor(options = {}) {
     this.seenLimit = Math.max(50, Number(options.seenLimit) || 400);
-    this.cardHash = '';
+    /**
+     * Card hashes, one per sender.
+     *
+     * A group scene carries a different card for every speaker, so a single
+     * slot would flip-flop: A, B, A, B… and re-send a whole card on every turn.
+     * Keyed by sender id, each person's card is sent once, and again only when
+     * that person's card changes.
+     *
+     * @type {Map<string | number, string>}
+     */
+    this.cardHash = new Map();
     this.stickerHash = '';
     this.rulesHash = '';
     /** @type {Set<string>} Message signatures already inside the session. */
@@ -52,15 +62,30 @@ export class InjectionTracker {
   /**
    * Send a block the first time, or when its text changes.
    *
-   * @param {'card' | 'stickers' | 'rules'} slot Which fixed block.
+   * A slot whose store is a `Map` keeps one hash per key, so blocks that differ
+   * per sender (the memory card) do not overwrite each other. Slots with a
+   * plain string store behave as before: one hash for the whole scene.
+   *
+   * @param {'card' | 'stickers' | 'rules' | 'length'} slot Which fixed block.
    * @param {string} block Block text; '' means the block is empty.
+   * @param {string | number} [key] Per-entity key, used by map-backed slots.
    * @returns {string} The block to send, or '' when the session already has it.
    */
-  fixed(slot, block) {
+  fixed(slot, block, key = '') {
     const text = String(block ?? '');
     if (text === '') return '';
     const hash = textHash(text);
-    if (this[`${slot}Hash`] === hash) {
+    const store = this[`${slot}Hash`];
+    if (store instanceof Map) {
+      if (store.get(key) === hash) {
+        this.skipped += text.length;
+        return '';
+      }
+      store.set(key, hash);
+      this.injected += text.length;
+      return text;
+    }
+    if (store === hash) {
       this.skipped += text.length;
       return '';
     }

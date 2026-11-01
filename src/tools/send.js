@@ -10,7 +10,7 @@
 
 import { stat } from 'node:fs/promises';
 import { captionOf } from '../bridge/outbox.js';
-import { compressForUpload } from '../media/compress.js';
+import { compressForUpload, disposeUploadCopy } from '../media/compress.js';
 
 const textSegment = text => ({ type: 'text', data: { text } });
 
@@ -75,11 +75,13 @@ export function registerQqSendTool(ctx, options) {
       // A 9 MB PNG takes seconds to upload; the same frame as JPEG is under 1 MB.
       // The local original is untouched, so a later read_image still sees full detail.
       let imagePath = wantsImage ? String(args.image) : '';
+      let temporaryCopy = '';
       if (wantsImage && !/^(https?:\/\/|base64:\/\/)/i.test(imagePath)) {
         const info = await stat(imagePath).catch(() => undefined);
         if (info !== undefined) {
           const upload = await compressForUpload(imagePath, { size: info.size, log: options.log });
           imagePath = upload.path;
+          if (upload.converted) temporaryCopy = upload.path;
         }
       }
 
@@ -120,6 +122,7 @@ export function registerQqSendTool(ctx, options) {
       }
       if (sent.length === 0) throw new Error('nothing to send: pass text, image, or file');
 
+      if (temporaryCopy !== '') await disposeUploadCopy(temporaryCopy);
       options.log(`qq_send ${context.scene} -> ${sent.join(', ')}`);
       return {
         report: `已发送到 ${context.scene}：${sent.join('，')}`,

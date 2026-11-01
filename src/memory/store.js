@@ -331,6 +331,10 @@ export function renderCard(request) {
   const hasNotes = card.notes.length > 0;
   if (!hasNotes && card.persona === null) return '';
   const lines = [`【记忆卡 · ${name}(${qq})】`];
+  // Compaction can leave an older copy of this card inside the summary. The card
+  // is re-sent after compaction, so say which copy wins instead of letting the
+  // model average the two.
+  lines.push('（本卡为最新版本；上文若出现旧卡或摘要里的旧卡，一律以本卡为准）');
   if (card.persona !== null) lines.push(`人设（对方对我的要求，照着做）：${card.persona.text}`);
   if (hasNotes) {
     const safe = filterNotes(card.notes);

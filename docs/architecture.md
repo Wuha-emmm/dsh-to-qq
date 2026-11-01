@@ -18,7 +18,7 @@ dsh-to-qq（Host 插件）
    ├─ 档案     archive：SQLite、媒体、检索、保留清理
    ├─ 渲染     render：文字转图、记忆卡、日报（PowerShell + GDI+）
    ├─ 媒体     media：图片、语音、文件、合并转发、引用取图
-   ├─ 工具     tools：12 个模型工具
+   ├─ 工具     tools：14 个模型工具
    └─ 用量     llm/cost：每轮 token、峰谷价与检索计费
    ⇕ ctx.sessionController
 DSH Agent（owner 会话 / guest 会话）
@@ -88,7 +88,7 @@ profile 级插件解析不到 DSH 的 `@deepseek-ai/*` 包，因此本插件只�
 
 | 块 | 行为 |
 |---|---|
-| 记忆卡 | 文本哈希变化才重发（换人、改人设、记了新印象） |
+| 记忆卡 | **按发送者**记哈希：换人才重发；同一群多人轮流说话不会每轮重发整卡（旧实现只有一个槽，A、B、A 会来回翻） |
 | 表情清单 | 会话内发一次，库变化才更新 |
 | 群规 | 会话内发一次 |
 | 群上下文 | 只发上次之后的新消息；同一条不会重复 |
@@ -161,7 +161,7 @@ DSH 在上下文接近窗口上限时会自动压缩（默认 `thresholdRatio 0.
 
 扫码登录这条路 B站已经不对外提供，所以不再实现。cookie 仍可直接粘贴作为备用。B站用 `x/web-interface/nav` 校验登录态。
 
-cookie 存在状态目录的 `accounts.json`（不写进 `config.json`，面板只回状态不回 cookie）。`fetch_page` 只对匹配域名附加 cookie（`bilibili.com/b23.tv/hdslb.com`、`xiaohongshu.com/xhslink.com/xhscdn.com`），其他站点不受影响。
+cookie 存在状态目录的 `accounts.json`（不写进 `config.json`，面板只回状态不回 cookie）。`web_fetch` 的 provider 只对匹配域名附加 cookie（`bilibili.com/b23.tv/hdslb.com`、`xiaohongshu.com/xhslink.com/xhscdn.com`），其他站点不受影响。
 
 ## 用登录的账号写 B站
 

@@ -19,6 +19,16 @@ test('each slot is independent', () => {
   assert.equal(tracker.fixed('stickers', '表情'), '');
 });
 
+test('a card is tracked per sender, not per scene', () => {
+  const tracker = new InjectionTracker();
+  assert.equal(tracker.fixed('card', 'A 卡', 11), 'A 卡');
+  assert.equal(tracker.fixed('card', 'B 卡', 22), 'B 卡');
+  assert.equal(tracker.fixed('card', 'A 卡', 11), '', 'alternating speakers must not re-send A');
+  assert.equal(tracker.fixed('card', 'B 卡', 22), '', 'nor B');
+  assert.equal(tracker.fixed('card', 'A 卡（新）', 11), 'A 卡（新）', 'A changed, only A re-sends');
+  assert.equal(tracker.fixed('card', 'B 卡', 22), '', 'B untouched');
+});
+
 test('delta returns only messages the tracker has not seen', () => {
   const tracker = new InjectionTracker();
   const first = [{ time: 1, senderId: 2, text: 'a' }];
