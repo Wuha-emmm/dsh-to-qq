@@ -13,6 +13,7 @@ import { normalizeRequestEvent, describeRequest } from './requests.js';
 import { buildReplySegments, memberNames } from './mentions.js';
 import { shouldSendNotice } from './notice.js';
 import { mergeText, pruneQueue } from './outbox.js';
+import { compressPayload } from '../media/compress.js';
 import { buildHints } from '../context/hints.js';
 import { TIER_TOOLS } from '../policy/restrictions.js';
 import { toImageSource } from '../tools/send.js';
@@ -843,12 +844,12 @@ export class Bridge {
         const summary = summarizeDigest(rows);
         // Same template as the memory card; text is the fallback when rendering fails.
         try {
-          const payload = await renderDigestCard({
+          const payload = await compressPayload(await renderDigestCard({
             gid: Number(scene.slice(scene.indexOf(':') + 1)),
             name: label.replace(/^群 /, ''),
             dayLabel,
             summary,
-          }, { log: this.log, backdropDir: this.mediaDir });
+          }, { log: this.log, backdropDir: this.mediaDir }), { log: this.log });
           const inGroupMessage = message.kind === 'group';
           await this.client.call(
             inGroupMessage ? 'send_group_msg' : 'send_private_msg',
@@ -911,14 +912,14 @@ export class Bridge {
           sceneLabel = groupName === '' ? `群 ${message.groupId}` : `群 · ${groupName}`;
         }
         try {
-          const payload = await renderMemoryCard({
+          const payload = await compressPayload(await renderMemoryCard({
             qq: target,
             name: card.name !== undefined && card.name !== '' ? card.name : message.senderName,
             persona: card.persona?.text ?? '',
             notes: card.notes ?? [],
             admin: this.store.get().access.admins.some(admin => admin.qq === target),
             sceneLabel,
-          }, { log: this.log, backdropDir: this.mediaDir });
+          }, { log: this.log, backdropDir: this.mediaDir }), { log: this.log });
           const inGroup = message.kind === 'group';
           await this.client.call(
             inGroup ? 'send_group_msg' : 'send_private_msg',

@@ -6,6 +6,7 @@
  */
 
 import { filterNotes } from '../memory/sensitive.js';
+import { compressPayload } from '../media/compress.js';
 
 /**
  * Register the tool.
@@ -50,7 +51,7 @@ export function registerMemoryCardTool(ctx, options) {
       const { renderMemoryCard } = await import('../render/memory-card.js');
       const { sceneLabelFor, resolveName } = await import('../bridge/labels.js');
       const name = await resolveName(bridge, target, card.name, info.scene);
-      const payload = await renderMemoryCard({
+      const payload = await compressPayload(await renderMemoryCard({
         qq: target,
         name,
         persona: card.persona?.text ?? '',
@@ -59,7 +60,7 @@ export function registerMemoryCardTool(ctx, options) {
         notes: filterNotes(card.notes ?? []).notes,
         admin: options.store.get().access.admins.some(admin => admin.qq === target),
         sceneLabel: await sceneLabelFor(bridge.client, info.scene),
-      }, { log: options.log, backdropDir: bridge.mediaDir });
+      }, { log: options.log, backdropDir: bridge.mediaDir }), { log: options.log });
 
       const inGroup = info.scene.startsWith('group:');
       const id = Number(info.scene.slice(info.scene.indexOf(':') + 1));

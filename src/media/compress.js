@@ -92,3 +92,40 @@ export async function compressForUpload(path, options = {}) {
     return { path: source, converted: false, bytes: size };
   }
 }
+
+/** Quality used for rendered cards: text stays crisp, bytes drop by ~80%. */
+export const CARD_QUALITY = 92;
+
+/**
+ * Re-encode a `base64://` image payload as JPEG for sending.
+ *
+ * Cards are rendered as PNG (758 KB – 1.05 MB) and travel as base64, so the QQ
+ * upload is the slow part. Text on a card is large; quality 92 keeps it crisp.
+ *
+ * @param {string} payload `base64://` payload from a renderer.
+ * @param {{ quality?: number, log?: (line: string) => void }} [options] Wiring.
+ * @returns {Promise<string>} JPEG payload, or the input when encoding did not help.
+ */
+export async function compressPayload(payload, options = {}) {
+  const raw = String(payload ?? '');
+  const encoded = raw.startsWith('base64://') ? raw.slice('base64://'.length) : raw;
+  if (encoded === '') return payload;
+  const bytes = Buffer.from(encoded, 'base64');
+  if (bytes.length === 0) return payload;
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-to-qq-card-'));
+  const source = join(directory, 'card.png');
+  const target = join(directory, 'card.jpg');
+  try {
+    await writeFile(source, bytes);
+    await encode(source, target, { quality: options.quality ?? CARD_QUALITY });
+    const jpeg = await readFile(target);
+    if (jpeg.length >= bytes.length) return payload;
+    options.log?.(`card payload ${Math.round(bytes.length / 1024)}KB → ${Math.round(jpeg.length / 1024)}KB`);
+    return `base64://${jpeg.toString('base64')}`;
+  } catch (error) {
+    options.log?.(`card encode failed, sending png: ${error?.message ?? error}`);
+    return payload;
+  } finally {
+    await rm(directory, { recursive: true, force: true }).catch(() => {});
+  }
+}

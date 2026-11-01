@@ -4,6 +4,7 @@
 
 import { summarizeDigest, dayRange, DIGEST_ROW_LIMIT } from '../digest/daily.js';
 import { renderDigestCard } from '../render/memory-card.js';
+import { compressPayload } from '../media/compress.js';
 
 /**
  * Register the tool.
@@ -55,10 +56,10 @@ export function registerDigestTool(ctx, options) {
         name = '';
       }
       const dayLabel = window.label;
-      const payload = await renderDigestCard({ gid, name, dayLabel, summary }, {
+      const payload = await compressPayload(await renderDigestCard({ gid, name, dayLabel, summary }, {
         log: options.log,
         backdropDir: bridge.mediaDir,
-      });
+      }), { log: options.log });
       await bridge.client.call(
         'send_group_msg',
         { group_id: gid, message: [{ type: 'image', data: { file: payload } }] },

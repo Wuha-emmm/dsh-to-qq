@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { compressForUpload, shouldCompress, UPLOAD_THRESHOLD_BYTES } from '../src/media/compress.js';
+import { compressForUpload, compressPayload, shouldCompress, UPLOAD_THRESHOLD_BYTES, CARD_QUALITY } from '../src/media/compress.js';
 
 /**
  * Draw a screenshot-like bitmap. The BMP encoder keeps it big, which is the point:
@@ -71,3 +71,25 @@ test('a big screenshot becomes a smaller jpeg copy', async () => {
     await rm(directory, { recursive: true, force: true });
   }
 }, { timeout: 60_000 });
+
+test('a rendered card payload comes back as a smaller jpeg', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-to-qq-card-'));
+  const path = join(directory, 'card.png');
+  try {
+    if (!makeBigPicture(path)) return;
+    const png = await readFile(path);
+    const jpeg = await compressPayload('base64://' + png.toString('base64'));
+    assert.match(jpeg.slice(0, 40), /^base64:\/\//);
+    const out = Buffer.from(jpeg.replace('base64://', ''), 'base64');
+    assert.ok(out.length < png.length, 'jpeg should be smaller');
+    assert.ok(out[0] === 0xff && out[1] === 0xd8, 'payload should be JPEG');
+    assert.equal(CARD_QUALITY, 92);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, { timeout: 30_000 });
+
+test('an empty payload is returned untouched', async () => {
+  assert.equal(await compressPayload(''), '');
+  assert.equal(await compressPayload('base64://'), 'base64://');
+});

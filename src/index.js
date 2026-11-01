@@ -47,7 +47,7 @@ import { rawSendRefusal } from './policy/raw-send.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.84.0';
+const VERSION = '0.85.0';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -1244,6 +1244,7 @@ ctx.effect(() => ctx.tools.guard(execution => {
     log,
   }));
 }
+
 
 
 
