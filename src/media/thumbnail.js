@@ -27,7 +27,7 @@ const DEFAULT_SIZE = 160;
  * @param {number} timeoutMs Hard limit.
  * @returns {Promise<void>} Resolves when the file is written.
  */
-async function runResize(input, output, size, timeoutMs) {
+export async function runResize(input, output, size, timeoutMs) {
   return await new Promise((resolve, reject) => {
     const child = spawn('powershell.exe', [
       '-NoProfile',

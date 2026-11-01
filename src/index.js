@@ -25,6 +25,7 @@ import { registerEmojiTool } from './tools/emoji.js';
 import { createFetchProvider } from './web/provider.js';
 import { registerBilibiliTool } from './tools/bilibili.js';
 import { registerBilibiliReadTool } from './tools/bilibili-read.js';
+import { registerShrinkTool } from './tools/shrink.js';
 import { AccountStore } from './accounts/store.js';
 import { verifyLogin } from './accounts/bilibili.js';
 import { findBrowser, launchBrowser, readBrowserCookies, cookieHeaderFrom, hasBilibiliSession } from './accounts/browser.js';
@@ -46,7 +47,7 @@ import { rawSendRefusal } from './policy/raw-send.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.81.0';
+const VERSION = '0.82.0';
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -1233,6 +1234,7 @@ ctx.effect(() => ctx.tools.guard(execution => {
   if (typeof web?.registerFetchProvider === 'function') {
     ctx.effect(() => web.registerFetchProvider(createFetchProvider({ log, cookieFor: url => accounts.cookieFor(url) })));
   }
+  ctx.effect(() => registerShrinkTool(ctx, { log }));
   ctx.effect(() => registerBilibiliReadTool(ctx, { accounts, log }));
   ctx.effect(() => registerBilibiliTool(ctx, {
     accounts,
@@ -1242,6 +1244,7 @@ ctx.effect(() => ctx.tools.guard(execution => {
     log,
   }));
 }
+
 
 
 

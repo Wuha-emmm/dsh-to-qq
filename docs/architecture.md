@@ -218,3 +218,14 @@ WBI 签名：从 `nav` 取 `wbi_img` 两个 key，按固定置换表混成 32 �
 **不允许绕路**：`pwsh` 里出现写类接口（`send_*` / `upload_*` / `set_*_add_request`，或任何 `:端口/send_` 路径）会被 guard 拒绝并提示改用 `qq_send`；读取类接口（`get_status` 等）不受影响。被拒次数记在 `qq_status` 的 `raw sends blocked` 一行。这是护栏，不是安全边界：拼接 URL 或脚本文件仍能绕过。这条是 08:00 那次“两张图”的根因：模型先 `upload_private_file`（已投递一次），再 `send_private_msg` 带同一文件（又投递一次），两个文件名不同、内容相同。
 
 面板里发起的回合此前 `qq_send` 报 “not bound”：`sessionContext` 查不到时现在会按 `sessions.json` 的绑定反查场景并缓存，所以界面里也能正常发图。
+
+## 看图先缩图
+
+`read_image` 按像素计费。实测 QQ 会话 24 小时内读了 **57 张截图**，文字量只有 7 千字符，token 却占上下文增长的大头（1280×720 约 1.1–1.5k token，1316×2832 约 3k）。两项改动：
+
+| 位置 | 行为 |
+|---|---|
+| `shrink_image` 工具 | 长边 >1280 时用 GDI+ 缩一份，返回小图路径；模型再 `read_image` 它。原文件不动 |
+| 入站 QQ 图片 | `promptImageParts` 在交给 Host 前先缩（`shrinkBytes`），手机截图不再原样进 prompt |
+
+实测 1316×2832 → 595×1280，像素少了 4.9 倍。小字看不清时仍可读原图，提示里写明了这点。
