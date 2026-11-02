@@ -1217,6 +1217,10 @@ export class Bridge {
     this.quota.record(message, tier);
 
     this.busy.add(message.scene);
+    // Media belongs to the turn that queued it. Anything still waiting when a
+    // new turn starts came from a path that never flushed; letting it ride
+    // along here would post an old screenshot next to a fresh answer.
+    if (this.mediaQueue.delete(message.scene)) this.log(`dropped orphaned media for ${message.scene}`);
     const startedAt = Date.now();
     if (this.pendingTurns !== null) {
       void this.pendingTurns.begin(message.scene, startedAt)
@@ -1582,15 +1586,25 @@ export class Bridge {
         tier: 'owner',
       });
       const body = String(result?.text ?? '').trim();
-      if (body !== '') {
+      // The resumed turn can queue a file or a picture too. Flush it with the
+      // text exactly like a normal turn: a path that forgets the queue leaves
+      // the attachment behind, and the next answer posts it a second time.
+      const merged = await this.#flushMedia(message, body).catch(error => {
+        this.log(`media flush failed after approval: ${error?.message ?? error}`);
+        return false;
+      });
+      if (body !== '' && !merged) {
         for (const chunk of chunkText(body, CHUNK_LIMIT)) await this.sendText(message, chunk, { record: false });
         this.recordOutbound?.(message, body);
+      }
+      if (body !== '') {
         // Same guard as the normal path: a watcher that still reads this turn as
         // foreign must not post the text a second time.
         this.#noteDelivery(message.scene, [body]);
       }
       this.lastReply.set(message.scene, body);
     } catch (error) {
+      await this.#flushMedia(message, '').catch(flushError => this.log(`media flush failed after approval: ${flushError?.message ?? flushError}`));
       await this.sendText(message, `继续执行失败：${String(error?.message ?? error).slice(0, 160)}`);
     } finally {
       await this.setTyping?.(message, false);

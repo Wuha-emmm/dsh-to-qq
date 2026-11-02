@@ -4,7 +4,7 @@
 
 > Bridge between QQ and DeepSeek Harness. Owner DMs get full local access; group mentions stay read-only.
 
-`Node ≥ 22` · `MIT` · 零 npm 运行时依赖 · 单测 379 条
+`Node ≥ 22` · `MIT` · 零 npm 运行时依赖 · 单测 380 条
 
 ---
 
@@ -100,7 +100,7 @@ Host 半边负责接入、判权、上下文、记忆、档案与工具；Client
 ## 开发
 
 ```powershell
-npm test           # 379 条单测
+npm test           # 380 条单测
 npm run smoke      # 真调 apply()，抓前置引用/缺服务
 npm run rehearse   # 端到端：解码→判权→上下文→卡片渲染→鉴权
 npm run inventory  # 文件、工具、命令、路由、配置键盘点
