@@ -121,6 +121,30 @@ test('admit drops blocked words', () => {
   assert.equal(admit(message, config).reason, 'blocked-word');
 });
 
+test('admit reserves the SnowLuma status command for the owner', () => {
+  const config = mergeConfig({
+    access: { admins: [{ qq: 10001, name: 'me', addedAt: 0 }], groupMode: 'all', groups: [], mentionOnly: true },
+  });
+  const addressed = text => ({ message: [{ type: 'at', data: { qq: '10002' } }, { type: 'text', data: { text } }] });
+  const says = text => ({ message: [{ type: 'text', data: { text } }] });
+  const stranger = { user_id: 999, sender: { user_id: 999, nickname: '路人' } };
+
+  const memberAt = normalizeEvent(groupEvent({ ...stranger, ...addressed(' #sl') }));
+  assert.equal(admit(memberAt, config).reason, 'not-admin-command');
+
+  const memberDm = normalizeEvent(dmEvent({ ...stranger, ...says(' #SL ') }));
+  assert.equal(admit(memberDm, config, true).reason, 'not-admin-command');
+
+  const adminAt = normalizeEvent(groupEvent(addressed(' #sl')));
+  assert.deepEqual(admit(adminAt, config), { accepted: true });
+  const adminDm = normalizeEvent(dmEvent(says('#sl')));
+  assert.deepEqual(admit(adminDm, config), { accepted: true });
+
+  // Chatter that only mentions the word still reaches the bot.
+  const chatter = normalizeEvent(dmEvent({ ...stranger, ...says('我看他发了#sl 然后没了') }));
+  assert.deepEqual(admit(chatter, config, true), { accepted: true });
+});
+
 test('chunkText splits on lines and respects the limit', () => {
   const text = Array.from({ length: 40 }, (_, index) => `第 ${index} 行`).join('\n');
   const chunks = chunkText(text, 40);

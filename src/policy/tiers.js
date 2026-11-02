@@ -52,11 +52,42 @@ export function blockedWord(text, config) {
   return '';
 }
 
+/**
+ * Chat commands SnowLuma used to answer for anyone, now reserved for the owner.
+ *
+ * SnowLuma's built-in `#sl` banner (version, platform, uptime) has no identity
+ * check at all, so the OneBot layer's copy is switched off and the bridge keeps
+ * the command: only an administrator reaches it, everyone else is dropped here
+ * before the text can become a model prompt.
+ */
+const OWNER_ONLY_COMMAND = /^#sl$/i;
+
+/**
+ * Strip the leading self-mentions a rendered message carries.
+ *
+ * `flattenSegments` renders an `at` segment as `@<qq>`, so an addressed command
+ * arrives as `@10002 #sl`; the command itself is what follows the mentions.
+ *
+ * @param {string} text Rendered message body.
+ * @param {number | undefined} selfId The bot account.
+ * @returns {string} The body without leading self-mentions.
+ */
+export function withoutSelfMention(text, selfId) {
+  const mark = selfId === undefined ? '' : `@${selfId}`;
+  let body = String(text ?? '').trim();
+  while (mark !== '' && body.startsWith(mark)) body = body.slice(mark.length).trim();
+  return body;
+}
+
 export function admit(message, config, isFriend = false) {
   const access = config.access;
   const isAdmin = access.admins.some(admin => admin.qq === message.senderId);
 
   if (blockedWord(message.text, config) !== '') return { accepted: false, reason: 'blocked-word' };
+
+  if (!isAdmin && OWNER_ONLY_COMMAND.test(withoutSelfMention(message.text, message.selfId))) {
+    return { accepted: false, reason: 'not-admin-command' };
+  }
 
   if (message.kind === 'dm') {
     if (isAdmin) return { accepted: true };

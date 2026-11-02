@@ -8,11 +8,15 @@ test('parseCommand recognizes Chinese and English commands', () => {
   assert.deepEqual(parseCommand('/list'), { name: 'list', arg: '' });
   assert.deepEqual(parseCommand('/新建 项目A'), { name: 'new', arg: '项目A' });
   assert.deepEqual(parseCommand('/记忆卡'), { name: 'card', arg: '' });
+  assert.deepEqual(parseCommand('#sl'), { name: 'status', arg: '' });
+  assert.deepEqual(parseCommand(' #SL '), { name: 'status', arg: '' });
 });
 
 test('parseCommand ignores ordinary text and unknown commands', () => {
   assert.equal(parseCommand('你好'), undefined);
   assert.equal(parseCommand('/unknown'), undefined);
+  assert.equal(parseCommand('#chatter'), undefined);
+  assert.equal(parseCommand('#未知命令'), undefined);
   assert.equal(parseCommand(''), undefined);
   assert.equal(parseCommand(undefined), undefined);
 });

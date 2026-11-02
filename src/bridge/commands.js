@@ -37,16 +37,20 @@ const ALIASES = new Map([
   ['cleanup', 'cleanup'],
   ['补印象', 'impressions'],
   ['impressions', 'impressions'],
+  ['sl', 'status'],
 ]);
 
 /**
  * Parse one message as a command.
  *
+ * `#` is accepted next to `/` so the bridge can own SnowLuma's chat commands
+ * (`#sl`) once the OneBot layer stops answering them itself.
+ *
  * @param {string} text The message body.
  * @returns {{ name: string, arg: string } | undefined} The command, or undefined.
  */
 export function parseCommand(text) {
-  const match = /^\s*\/([a-zA-Z\u4e00-\u9fa5]+)\s*(.*)$/s.exec(String(text ?? ''));
+  const match = /^\s*[/#]([a-zA-Z\u4e00-\u9fa5]+)\s*(.*)$/s.exec(String(text ?? ''));
   if (match === null) return undefined;
   const name = ALIASES.get(match[1].toLowerCase());
   if (name === undefined) return undefined;

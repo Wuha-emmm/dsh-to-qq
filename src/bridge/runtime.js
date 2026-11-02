@@ -18,7 +18,7 @@ import { compressPayload, disposeUploadCopy } from '../media/compress.js';
 import { buildHints } from '../context/hints.js';
 import { TIER_TOOLS } from '../policy/restrictions.js';
 import { toImageSource } from '../tools/send.js';
-import { admit, blockedWord, tierOf } from '../policy/tiers.js';
+import { admit, blockedWord, tierOf, withoutSelfMention } from '../policy/tiers.js';
 import { Quota, Semaphore } from '../policy/quota.js';
 import { looksLikeApproval } from '../policy/approvals.js';
 import { SceneBuffer, renderContext } from '../context/buffer.js';
@@ -950,15 +950,49 @@ export class Bridge {
       }
       case 'status': {
         const snapshot = this.snapshot();
-        await this.sendText(message, [
+        const lines = [
           `状态：${snapshot.state}${this.paused ? '（已暂停）' : ''}`,
           `会话 ${Object.keys(this.map?.all() ?? {}).length}，场景缓冲 ${snapshot.scenes}`,
           `收到 ${snapshot.counters.messages}，回答 ${snapshot.counters.answered}，失败 ${snapshot.counters.failed}`,
-        ].join('\n'));
+        ];
+        const luma = await this.#snowlumaLine();
+        if (luma !== '') lines.push(luma);
+        await this.sendText(message, lines.join('\n'));
         return;
       }
       default:
         await this.sendText(message, '不认识这个命令。');
+    }
+  }
+
+  /**
+   * One line describing the SnowLuma instance, or '' when it cannot be asked.
+   *
+   * The banner used to come from SnowLuma's own `#sl`, which now answers the
+   * owner only, so `/状态` fetches the same numbers over the API instead.
+   *
+   * @returns {Promise<string>} A line like `SnowLuma 2.2.1 · 在线 · 已运行 3小时12分`.
+   */
+  async #snowlumaLine() {
+    if (this.client === undefined) return '';
+    try {
+      const [version, status] = await Promise.all([
+        this.client.call('get_version_info', {}, { timeoutMs: 3000 }),
+        this.client.call('get_status', {}, { timeoutMs: 3000 }),
+      ]);
+      const name = String(version?.app_name ?? 'SnowLuma');
+      const number = String(version?.app_version ?? '');
+      const parts = [number === '' ? name : `${name} ${number}`];
+      parts.push(status?.online === true ? '在线' : '离线');
+      const seconds = Math.floor(Number(status?.time));
+      if (Number.isFinite(seconds) && seconds > 0) {
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        parts.push(`已运行 ${hours > 0 ? `${hours}小时${minutes}分` : `${minutes}分`}`);
+      }
+      return parts.join(' · ');
+    } catch {
+      return '';
     }
   }
 
@@ -1081,13 +1115,13 @@ export class Bridge {
 
     const tier = tierOf(message, config.access);
 
-    // Slash commands run before the model, and before the pause gate.
-    if (tier === 'owner') {
-      const command = parseCommand(message.text);
-      if (command !== undefined) {
-        await this.#runCommand(message, command);
-        return;
-      }
+    // Slash commands run before the model, and before the pause gate. A group
+    // administrator may only reach the status command there: every other name
+    // either writes to the host or rebinds the session.
+    const command = parseCommand(withoutSelfMention(message.text, message.selfId));
+    if (command !== undefined && (tier === 'owner' || (tier === 'owner-group' && command.name === 'status'))) {
+      await this.#runCommand(message, command);
+      return;
     }
 
     // `/yes` approves the tool the model just tried to run, then the admin retries.

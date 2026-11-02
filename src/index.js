@@ -50,7 +50,7 @@ import { rawSendRefusal } from './policy/raw-send.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.86.5';
+const VERSION = '0.86.6';
 
 /** Largest backup a browser upload may carry. */
 const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
