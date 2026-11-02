@@ -255,6 +255,45 @@ test('a host-injected turn is handed to the watcher, a QQ turn is not', async ()
   driver.unwatch('s1');
 });
 
+test('an injected message inside a QQ turn does not make it foreign', async () => {
+  const controller = new FakeController();
+  const driver = new DshDriver({ controller, map: { get: () => undefined }, log: () => {} });
+  /** @type {string[]} */
+  const delivered = [];
+  driver.watch('s1', text => { delivered.push(text); });
+  await new Promise(resolve => setTimeout(resolve, 10));
+
+  const seq = (controller.cursor += 1);
+  controller.push({ type: 'user/message', seq, data: { source: { rpcId: 'qq-live' } } });
+  controller.push({ type: 'turn/start', seq: seq + 1, data: { turn: 15, step: 0 } });
+  controller.push({
+    type: 'assistant/message',
+    seq: seq + 2,
+    data: { message: { content: [{ type: 'reasoning', text: '想想怎么截屏' }] } },
+  });
+  // The Host splices these into the running turn; neither carries an rpcId.
+  controller.push({
+    type: 'user/message',
+    seq: seq + 3,
+    data: { content: [{ type: 'text', text: 'The approval policy changed to never.' }], source: { kind: 'user-approval' } },
+  });
+  controller.push({
+    type: 'user/message',
+    seq: seq + 4,
+    data: { content: [{ type: 'text', text: 'Current runtime context.' }], source: { kind: 'runtime-context' } },
+  });
+  controller.push({
+    type: 'assistant/message',
+    seq: seq + 5,
+    data: { message: { content: [{ type: 'text', text: '桌面已经截好发给你了' }] } },
+  });
+  controller.push({ type: 'turn/end', seq: seq + 6, data: { reason: { kind: 'completed' } } });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(delivered, [], 'the injection must not turn the owner into a foreign prompt');
+
+  driver.unwatch('s1');
+});
+
 test('ask reports the request id once the Host owns the turn', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-to-qq-'));
   try {

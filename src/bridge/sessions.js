@@ -200,8 +200,11 @@ export class DshDriver {
             const event = records[index]?.event;
             if (event?.type === 'turn/end') break;
             if (event?.type === 'user/message') {
-              promptRpc = String(event.data?.source?.rpcId ?? '');
-              break;
+              const rpc = String(event.data?.source?.rpcId ?? '');
+              if (rpc !== '') {
+                promptRpc = rpc;
+                break;
+              }
             }
           }
           continue;
@@ -210,8 +213,16 @@ export class DshDriver {
         const event = frame.event;
         const type = event?.type;
         if (type === 'user/message') {
-          promptRpc = String(event.data?.source?.rpcId ?? '');
-          text = '';
+          const rpc = String(event.data?.source?.rpcId ?? '');
+          // Only an rpcId names the prompt that opened a turn. The Host also
+          // splices messages into a running one — approval-policy changes,
+          // runtime-context snapshots — and those carry no rpcId. Letting one
+          // overwrite the owner made `ask()`'s own reply look foreign, so the
+          // person got it twice (approval resumed turns included).
+          if (rpc !== '') {
+            promptRpc = rpc;
+            text = '';
+          }
           continue;
         }
         if (type === 'assistant/message') {

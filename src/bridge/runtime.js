@@ -1585,6 +1585,9 @@ export class Bridge {
       if (body !== '') {
         for (const chunk of chunkText(body, CHUNK_LIMIT)) await this.sendText(message, chunk, { record: false });
         this.recordOutbound?.(message, body);
+        // Same guard as the normal path: a watcher that still reads this turn as
+        // foreign must not post the text a second time.
+        this.#noteDelivery(message.scene, [body]);
       }
       this.lastReply.set(message.scene, body);
     } catch (error) {
