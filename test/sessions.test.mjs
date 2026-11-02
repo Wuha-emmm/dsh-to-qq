@@ -294,6 +294,35 @@ test('an injected message inside a QQ turn does not make it foreign', async () =
   driver.unwatch('s1');
 });
 
+test('a turn opened by a bare background event still reaches the chat', async () => {
+  const controller = new FakeController();
+  const driver = new DshDriver({ controller, map: { get: () => undefined }, log: () => {} });
+  /** @type {string[]} */
+  const delivered = [];
+  driver.watch('s1', text => { delivered.push(text); });
+  await new Promise(resolve => setTimeout(resolve, 10));
+
+  // A settled subagent wakes the session: turn/start then a prompt with no
+  // rpcId at all. This is not ask()'s turn, so its answer belongs in the chat.
+  const seq = (controller.cursor += 1);
+  controller.push({ type: 'turn/start', seq, data: { turn: 27, step: 0 } });
+  controller.push({
+    type: 'user/message',
+    seq: seq + 1,
+    data: { content: [{ type: 'text', text: 'Background subagent 0db7 settled.' }], source: { kind: 'subagent-settled' } },
+  });
+  controller.push({
+    type: 'assistant/message',
+    seq: seq + 2,
+    data: { message: { content: [{ type: 'text', text: '四格都领完了，就等你点头。' }] } },
+  });
+  controller.push({ type: 'turn/end', seq: seq + 3, data: { turn: 27, reason: { kind: 'completed' } } });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(delivered, ['四格都领完了，就等你点头。'], 'the background turn must not be swallowed');
+
+  driver.unwatch('s1');
+});
+
 test('ask reports the request id once the Host owns the turn', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-to-qq-'));
   try {

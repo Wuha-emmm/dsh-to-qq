@@ -179,6 +179,8 @@ export class DshDriver {
   async #watchLoop(sessionId, onText, signal) {
     /** Prompt that opened the current turn; `null` until one is seen, `qq-` means `ask()` owns it. */
     let promptRpc = null;
+    /** True once any prompt was seen in this turn, rpcId or not. */
+    let promptSeen = false;
     let text = '';
     try {
       const frames = this.controller.follow(
@@ -213,6 +215,7 @@ export class DshDriver {
         const event = frame.event;
         const type = event?.type;
         if (type === 'user/message') {
+          promptSeen = true;
           const rpc = String(event.data?.source?.rpcId ?? '');
           // Only an rpcId names the prompt that opened a turn. The Host also
           // splices messages into a running one — approval-policy changes,
@@ -232,13 +235,17 @@ export class DshDriver {
           continue;
         }
         if (type === 'turn/end') {
-          // No prompt seen at all is not proof of a foreign turn: stay quiet,
-          // because a missed injection is cheaper than a reply sent twice.
-          const owned = promptRpc === null || promptRpc.startsWith('qq-');
+          // Deliver a turn this bridge did not start — a background subagent
+          // reporting back opens one of those, and staying quiet loses the
+          // answer. A turn with no prompt at all is the one case to keep quiet:
+          // the watcher joined mid-turn, so it cannot tell whose turn it is.
+          const owned = promptRpc !== null && promptRpc.startsWith('qq-');
+          const sawPrompt = promptSeen;
           const body = text.trim();
           promptRpc = null;
+          promptSeen = false;
           text = '';
-          if (owned || body === '') continue;
+          if (owned || !sawPrompt || body === '') continue;
           try {
             await onText(body);
           } catch (error) {
