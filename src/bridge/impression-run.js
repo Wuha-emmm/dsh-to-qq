@@ -7,6 +7,7 @@
  */
 
 import { enoughSignal, buildImpressionPrompt, parseImpressionBullets } from '../memory/impressions.js';
+import { filterNotes } from '../memory/sensitive.js';
 
 /** Minimum gap before the same person is summarized again. */
 const PER_SENDER_COOLDOWN_MS = 30 * 60_000;
@@ -86,7 +87,14 @@ async function writeImpressions(bridge, senderId, card, batch, config) {
     bridge.log(`impression summary produced no bullets for ${senderId}`);
     return false;
   }
-  await bridge.memory.setNotes(senderId, notes);
+  // The summarizer is a model: drop private and work-record lines before they
+  // ever reach the card, not only when it is rendered.
+  const safe = filterNotes(notes).notes;
+  if (safe.length === 0) {
+    bridge.log(`impression summary was entirely private for ${senderId}; nothing stored`);
+    return false;
+  }
+  await bridge.memory.setNotes(senderId, safe);
   await bridge.memory.setImpressionCursor(senderId, Number(batch[batch.length - 1].time_unix) || 0);
   bridge.impressionRanAt.set(senderId, Date.now());
   return true;

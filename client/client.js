@@ -639,6 +639,7 @@ window.__ModuleLoader__.load({
       { id: '登录', title: '登录', custom: 'accounts' },
       { id: '用量', title: '用量', custom: 'usage' },
       { id: '档案', title: '档案', custom: 'archive' },
+      { id: '备份', title: '备份', custom: 'backup' },
     ];
 
     /** One settings row. */
@@ -1118,6 +1119,255 @@ window.__ModuleLoader__.load({
           h('button', { type: 'button', onClick: prune, style: UI.ghost }, '立即清理')),
         status === '' ? null : h('div', { style: { ...UI.muted, marginTop: 8 } }, status));
     };
+
+    /**
+     * Backup and restore.
+     *
+     * One zip carries the archive, memory cards, stickers and settings; the QQ
+     * to DSH session bindings are deliberately left out, because a session id
+     * only exists on the machine that created it. A restored binding that no
+     * longer resolves is rebuilt on the first message, so nothing has to be
+     * clicked after moving to a new computer.
+     */
+    const BackupPanel = props => {
+      const [data, setData] = React.useState(null);
+      const [status, setStatus] = React.useState('');
+      const [busy, setBusy] = React.useState('');
+      const [report, setReport] = React.useState(null);
+      const [customPath, setCustomPath] = React.useState('');
+      const [dryRun, setDryRun] = React.useState(true);
+      const [clearBindings, setClearBindings] = React.useState(false);
+      const [file, setFile] = React.useState(null);
+      const fileRef = React.useRef(null);
+
+      const load = () => getJson('/dsh-to-qq/api/backups')
+        .then(setData)
+        .catch(reason => setStatus(`读取备份列表失败：${reason?.message ?? reason}`));
+      React.useEffect(() => {
+        void load();
+      }, []);
+
+      const size = bytes => (bytes >= 1048576
+        ? `${(bytes / 1048576).toFixed(2)} MB`
+        : `${Math.max(1, Math.round(bytes / 1024))} KB`);
+
+      const make = async () => {
+        setBusy('backup');
+        setStatus('正在打包…');
+        try {
+          const result = await postJson('/dsh-to-qq/api/backup', {});
+          setStatus(`已生成 ${result.backup.name}（${size(result.backup.bytes)}），可下载后带到新机器`);
+          await load();
+        } catch (reason) {
+          setStatus(`备份失败：${reason?.message ?? reason}`);
+        } finally {
+          setBusy('');
+        }
+      };
+
+      const describe = result => {
+        const counts = result?.counts ?? {};
+        const parts = [
+          `消息 ${counts.messages ?? 0}`,
+          `记忆卡 ${counts.cards ?? 0}`,
+          `表情 ${counts.stickers ?? 0}`,
+        ];
+        if (result?.backupBefore) parts.push(`恢复前快照 ${result.backupBefore}`);
+        for (const warning of result?.warnings ?? []) parts.push(warning);
+        return parts.join(' · ');
+      };
+
+      const restore = async (name, preview, path) => {
+        if (preview !== true && !window.confirm(`恢复 ${name}？当前数据会先自动备份一份，完成后桥接会重连。`)) return;
+        setBusy(preview === true ? 'preview' : 'restore');
+        setStatus(preview === true ? '正在预演…' : '正在恢复…');
+        try {
+          const result = await postJson('/dsh-to-qq/api/restore', {
+            ...(path === undefined ? { name } : { path }),
+            dryRun: preview === true,
+            clearBindings,
+          });
+          setReport(result);
+          setStatus(preview === true
+            ? '预演完成，没有写入任何数据'
+            : `已恢复 ${result.restored?.length ?? 0} 个文件；桥接应已重连`);
+          if (preview !== true) await load();
+        } catch (reason) {
+          setStatus(`恢复失败：${reason?.message ?? reason}（已回滚）`);
+        } finally {
+          setBusy('');
+        }
+      };
+
+      const upload = async () => {
+        if (file === null) {
+          setStatus('先选一个 .zip 备份文件');
+          return;
+        }
+        setBusy('upload');
+        setStatus('上传中…');
+        try {
+          const name = `upload-${Date.now()}.zip`;
+          const response = await fetch(`/dsh-to-qq/api/backup/upload?name=${encodeURIComponent(name)}`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'content-type': 'application/octet-stream' },
+            body: file,
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(result.error ?? `HTTP ${response.status}`);
+          setStatus('上传完成，开始恢复…');
+          await restore(name, false);
+        } catch (reason) {
+          setStatus(`上传失败：${reason?.message ?? reason}`);
+        } finally {
+          setBusy('');
+        }
+      };
+
+      const remove = async name => {
+        if (!window.confirm(`删除备份 ${name}？文件会被直接移除。`)) return;
+        try {
+          const response = await fetch(`/dsh-to-qq/api/backups?name=${encodeURIComponent(name)}`, {
+            method: 'DELETE',
+            credentials: 'same-origin',
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(result.error ?? `HTTP ${response.status}`);
+          setStatus(`已删除 ${name}`);
+          await load();
+        } catch (reason) {
+          setStatus(`删除失败：${reason?.message ?? reason}`);
+        }
+      };
+
+      const backups = data?.backups ?? [];
+      const rowStyle = {
+        display: 'flex', alignItems: 'center', gap: 8, padding: '9px 0',
+        borderTop: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))',
+      };
+
+      return [
+        h('div', { key: 'make', style: UI.card },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0 4px' } },
+            h('div', { style: { flex: 1, minWidth: 0 } },
+              h('div', { style: { fontSize: 12.5, fontWeight: 600 } }, '立即备份'),
+              h('div', { style: UI.muted },
+                '把消息档案、记忆卡、表情库和设置打成一个 zip；会话绑定不迁移，换机后首次对话会自动重建')),
+            h('button', {
+              type: 'button',
+              onClick: make,
+              disabled: busy !== '',
+              style: { ...UI.primary, opacity: busy === '' ? 1 : 0.6 },
+            }, busy === 'backup' ? '打包中…' : '立即备份')),
+          props.fieldRow({ path: 'backup.includeMedia', label: '包含表情预览与附件', type: 'checkbox' }),
+          props.fieldRow({ path: 'backup.includeCookies', label: '包含登录 Cookie（新机器免重新登录）', type: 'checkbox' }),
+          data?.directory === undefined
+            ? null
+            : h('div', { style: { ...UI.muted, paddingTop: 6 } },
+              `备份目录：${data.directory}`,
+              navigator.clipboard === undefined
+                ? null
+                : h('button', {
+                  type: 'button',
+                  onClick: () => void navigator.clipboard.writeText(data.directory).then(() => setStatus('路径已复制')),
+                  style: { ...UI.ghost, marginLeft: 8, padding: '2px 8px' },
+                }, '复制路径')),
+          status === '' ? null : h('div', { style: { ...UI.muted, paddingTop: 8 } }, status)),
+
+        h('div', { key: 'list', style: { ...UI.card, marginTop: 14 } },
+          h('div', { style: UI.sectionTitle }, `备份记录${data === null ? '' : `（${backups.length}）`}`),
+          data === null
+            ? h('div', { style: { ...UI.muted, paddingBottom: 10 } }, '读取中…')
+            : backups.length === 0
+              ? h('div', { style: { ...UI.muted, paddingBottom: 10 } }, '还没有备份；点上面的「立即备份」生成第一份')
+              : backups.map(row => h('div', { key: row.name, style: rowStyle },
+                h('div', { style: { flex: 1, minWidth: 0 } },
+                  h('div', { style: { fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, row.name),
+                  h('div', { style: UI.muted },
+                    `${size(row.bytes)} · ${new Date(row.mtime).toLocaleString('zh-CN')} · ${row.kind}`)),
+                h('a', {
+                  href: `/dsh-to-qq/api/backup/download?name=${encodeURIComponent(row.name)}`,
+                  download: row.name,
+                  style: { ...UI.ghost, textDecoration: 'none' },
+                }, '下载'),
+                h('button', {
+                  type: 'button',
+                  disabled: busy !== '',
+                  style: UI.ghost,
+                  onClick: () => void restore(row.name, true),
+                }, '预演'),
+                h('button', {
+                  type: 'button',
+                  disabled: busy !== '',
+                  style: UI.ghost,
+                  onClick: () => void restore(row.name, false),
+                }, '恢复'),
+                h('button', {
+                  type: 'button',
+                  disabled: busy !== '',
+                  style: { ...UI.ghost, color: 'var(--dsw-alias-state-error-primary, #c0392b)' },
+                  onClick: () => void remove(row.name),
+                }, '删除')))),
+
+        h('div', { key: 'restore', style: { ...UI.card, marginTop: 14 } },
+          h('div', { style: UI.sectionTitle }, '从文件恢复'),
+          h('div', { style: { ...UI.muted, paddingBottom: 8 } },
+            '换机流程：新机器装好插件 → 选这里的 zip → 恢复。消息、记忆、表情、管理员和群设置都会回来。'),
+          h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
+            h('input', {
+              ref: fileRef,
+              type: 'file',
+              accept: '.zip,application/zip',
+              onChange: event => setFile(event.target.files?.[0] ?? null),
+              style: { fontSize: 12, maxWidth: 320 },
+            }),
+            h('button', {
+              type: 'button',
+              disabled: busy !== '',
+              style: UI.ghost,
+              onClick: () => void upload(),
+            }, file === null ? '上传并恢复' : `上传并恢复（${(file.size / 1048576).toFixed(1)} MB）`)),
+          h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 } },
+            h('input', {
+              value: customPath,
+              placeholder: '或填 zip 的完整路径，例如 D:\\dsh-to-qq-backup.zip',
+              onChange: event => setCustomPath(event.target.value),
+              style: { ...UI.input, flex: 1 },
+            }),
+            h('button', {
+              type: 'button',
+              disabled: busy !== '' || customPath.trim() === '',
+              style: UI.ghost,
+              onClick: () => void restore(customPath.trim(), dryRun, customPath.trim()),
+            }, dryRun ? '预演路径' : '按路径恢复')),
+          h('label', { style: { ...UI.muted, display: 'flex', gap: 6, alignItems: 'center', marginTop: 10 } },
+            h('input', {
+              type: 'checkbox',
+              checked: dryRun,
+              onChange: event => setDryRun(event.target.checked),
+            }),
+            '路径恢复时先预演，不写入（推荐）'),
+          h('label', { style: { ...UI.muted, display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 } },
+            h('input', {
+              type: 'checkbox',
+              checked: clearBindings,
+              onChange: event => setClearBindings(event.target.checked),
+            }),
+            '清空会话绑定（一般不用勾：失效的会话会在下一轮自动重建）'),
+          report === null
+            ? null
+            : h('div', { style: { ...UI.muted, marginTop: 10, lineHeight: 1.7 } },
+              `${report.dryRun === true ? '预演结果' : '恢复结果'}：${report.name} · ${report.createdAt ?? ''} · 插件 ${report.version || '未知'} · ${describe(report)}`)),
+
+        h('div', { key: 'auto', style: { ...UI.card, marginTop: 14 } },
+          h('div', { style: UI.sectionTitle }, '自动备份'),
+          props.fieldRow({ path: 'backup.auto', label: '每天自动备份一次', type: 'checkbox' }),
+          props.fieldRow({ path: 'backup.keep', label: '自动备份保留份数', type: 'number' }),
+          h('div', { style: { ...UI.muted, paddingTop: 6 } },
+            '自动备份只包含数据文件，不含预览图；手动备份总是保留，不会被这份份数清掉。')),
+      ];
+    };
     /** Backfill button plus its live status: idle, running, or just finished. */
     const ImpressionBox = () => {
       const [state, setState] = React.useState(null);
@@ -1505,6 +1755,8 @@ const StickerBoard = () => {
           ? [h(AccountsBox, { key: 'accounts' })]
         : active.custom === 'usage'
           ? [h(UsageBox, { key: 'usage' })]
+        : active.custom === 'backup'
+          ? [h(BackupPanel, { key: 'backup', fieldRow })]
         : active.custom === 'models'
           ? [
             h('div', { key: 'card', style: UI.card },

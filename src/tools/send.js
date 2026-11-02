@@ -40,12 +40,12 @@ export function registerQqSendTool(ctx, options) {
   return ctx.tools.register({
     name: 'qq_send',
     description:
-      'Send something into the current QQ conversation: text, an image, or a file. Use it when the user asks you to send/receive a file or a screenshot. With an image, leave text empty unless the picture plus one short line is the whole message (a caption over 30 characters is cut, because the same explanation repeated in your reply is what the person sees twice). Local images/files are administrator only.',
+      'Send something into the current QQ conversation: text, an image, or a file. Use it when the user asks you to send/receive a file or a screenshot. With an image, the text is a caption: a short one reads as a label, and a long one is merged into this turn\'s reply (nothing is truncated, and a caption already inside the reply is not repeated). Local images/files are administrator only.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        text: { type: 'string', description: 'Short caption (under 30 characters). Leave empty when the reply will explain it.' },
+        text: { type: 'string', description: 'Caption for the attachment; short labels read best, longer text is merged into the reply.' },
         image: { type: 'string', description: 'Absolute path or http(s) URL of an image to send. Admin only.' },
         file: { type: 'string', description: 'Absolute path of a file to upload. Admin only.' },
       },
@@ -95,7 +95,7 @@ export function registerQqSendTool(ctx, options) {
         });
         options.log(`qq_send queued ${context.scene} (caption ${caption.text.length} chars)`);
         return {
-          report: `已排到本轮回复里一起发送${caption.truncated ? '（说明超过 30 字，已截断；剩下的写进正文）' : ''}`,
+          report: `已排到本轮回复里一起发送（说明会与正文合并，不截断）`,
           scene: context.scene,
           queued: true,
         };

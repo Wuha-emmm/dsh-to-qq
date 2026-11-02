@@ -151,8 +151,7 @@ test('DshDriver times out and cancels the turn', async () => {
   }
 });
 
-test('DshDriver rebinds once when the stored session vanished', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-to-qq-'));
+test('DshDriver rebinds once when the stored session vanished', async () => {  const dir = await mkdtemp(join(tmpdir(), 'dsh-to-qq-'));
   try {
     const map = new SessionMap(join(dir, 'sessions.json'));
     await map.set('dm:1', 'stale-session');
@@ -217,4 +216,39 @@ test('a plain turn is not reported as compacted', async () => {
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
+});
+
+test('a host-injected turn is handed to the watcher, a QQ turn is not', async () => {
+  const controller = new FakeController();
+  const driver = new DshDriver({ controller, map: { get: () => undefined }, log: () => {} });
+  /** @type {string[]} */
+  const delivered = [];
+  driver.watch('s1', text => { delivered.push(text); });
+  await new Promise(resolve => setTimeout(resolve, 10));
+
+  // A subagent report: injected turn, no qq- rpcId.
+  const seq1 = (controller.cursor += 1);
+  controller.push({ type: 'user/message', seq: seq1, data: { source: { rpcId: 'host-injected' } } });
+  controller.push({
+    type: 'assistant/message',
+    seq: seq1 + 1,
+    data: { message: { content: [{ type: 'text', text: '子智能体跑完了' }] } },
+  });
+  controller.push({ type: 'turn/end', seq: seq1 + 2, data: { reason: { kind: 'completed' } } });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(delivered, ['子智能体跑完了'], 'the injected turn must reach the chat');
+
+  // A QQ turn: ask() already delivers it, so the watcher must stay quiet.
+  const seq2 = (controller.cursor += 1);
+  controller.push({ type: 'user/message', seq: seq2, data: { source: { rpcId: 'qq-abc' } } });
+  controller.push({
+    type: 'assistant/message',
+    seq: seq2 + 1,
+    data: { message: { content: [{ type: 'text', text: '正常回复' }] } },
+  });
+  controller.push({ type: 'turn/end', seq: seq2 + 2, data: { reason: { kind: 'completed' } } });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(delivered, ['子智能体跑完了'], 'a QQ turn must not be delivered twice');
+
+  driver.unwatch('s1');
 });

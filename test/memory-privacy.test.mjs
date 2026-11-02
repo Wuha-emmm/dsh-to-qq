@@ -24,6 +24,18 @@ test('ordinary project notes survive', () => {
   for (const text of kept) assert.equal(isSensitiveNote(text), false, text);
 });
 
+test('addresses, identifiers and work records are dropped', () => {
+  const dropped = [
+    '家在江岸区某小区 3 栋 501',
+    '身份证号尾号 8842',
+    '工号 4417，在车间干活',
+    '这周排班是夜班',
+    '单位在城郊的检修段，做月修改造',
+    '邮箱 someone@example.com',
+  ];
+  for (const text of dropped) assert.equal(isSensitiveNote(text), true, text);
+});
+
 test('a bare local path is softened instead of dropped', () => {
   const result = sanitizeNote('建议数据单独分盘存（D:\\data\\qq）');
   assert.equal(result.dropped, false);

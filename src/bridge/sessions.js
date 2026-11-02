@@ -23,11 +23,12 @@ export class SessionMap {
   /**
    * @param {string} file Absolute path to sessions.json.
    */
-  constructor(file) {
+  constructor(file, debug = () => {}) {
     this.file = file;
     /** @type {Record<string, string>} */
     this.entries = {};
     this.loaded = false;
+    this.debug = debug;
   }
 
   /** Read the mapping file, tolerating absence and corruption. */
@@ -72,6 +73,7 @@ export class SessionMap {
    */
   async remove(scene) {
     await this.load();
+    this.debug(`remove ${scene}`);
     delete this.entries[scene];
     await this.#flush();
   }
@@ -88,6 +90,12 @@ export class SessionMap {
     await writeFile(temporary, `${JSON.stringify(this.entries, null, 2)}\n`, 'utf8');
     const { rename } = await import('node:fs/promises');
     await rename(temporary, this.file);
+    try {
+      const back = JSON.parse(await readFile(this.file, 'utf8'));
+      this.debug(`flush ${Object.keys(back).join(',') || '(empty)'}`);
+    } catch {
+      // Diagnostics only.
+    }
   }
 }
 
@@ -103,10 +111,16 @@ export class DshDriver {
    */
   constructor(options) {
     this.controller = options.controller;
+    /** @type {any} Optional `ctx.workspaceRegistry`; sessions join a Workspace through it. */
+    this.workspaces = options.workspaceRegistry;
     this.map = options.map;
     this.guests = options.guests;
     this.guestStore = options.guestStore;
     this.log = options.log ?? (() => {});
+    /** Optional structured trace sink (temporary diagnostics). */
+    this.debug = options.debug ?? (() => {});
+    /** Scene -> in-flight first binding, so concurrent asks share one session. */
+    this.pending = new Map();
     /** @type {(detail: string) => void} */
     this.onImageRejected = options.onImageRejected ?? (() => {});
     /** @type {(type: string) => void} */
@@ -121,6 +135,113 @@ export class DshDriver {
     this.routeChecks = new Map();
     /** @type {((sessionId: string) => Promise<void>) | undefined} */
     this.applyPermission = options.applyPermission;
+    /** @type {Map<string, AbortController>} Standing watchers, one per session. */
+    this.watchers = new Map();
+  }
+
+  /**
+   * Follow a session forever and report answers this bridge did not ask for.
+   *
+   * A subagent finishing, a timer firing or any other host-injected turn runs a
+   * turn in the same session without going through `ask()`, so nothing is
+   * listening and the model's text would stay inside DSH. The watcher listens
+   * permanently and hands back exactly those turns; turns started by `ask()`
+   * carry an `rpcId` beginning with `qq-` and are left alone, so a reply is
+   * never sent twice.
+   *
+   * @param {string} sessionId Session to watch.
+   * @param {(text: string) => Promise<void> | void} onText Delivers an unwatched turn's text.
+   * @returns {void}
+   */
+  watch(sessionId, onText) {
+    const id = String(sessionId ?? '');
+    if (id === '' || this.watchers.has(id)) return;
+    const abort = new AbortController();
+    this.watchers.set(id, abort);
+    void this.#watchLoop(id, onText, abort.signal);
+  }
+
+  /** Stop watching one session (its binding was replaced or removed). */
+  unwatch(sessionId) {
+    const id = String(sessionId ?? '');
+    const abort = this.watchers.get(id);
+    if (abort === undefined) return;
+    this.watchers.delete(id);
+    abort.abort();
+  }
+
+  /**
+   * @param {string} sessionId Session to follow.
+   * @param {(text: string) => Promise<void> | void} onText Sink for foreign turns.
+   * @param {AbortSignal} signal Stops the loop.
+   * @returns {Promise<void>} Resolves when the stream ends.
+   */
+  async #watchLoop(sessionId, onText, signal) {
+    /** Prompt that opened the current turn; `null` until one is seen, `qq-` means `ask()` owns it. */
+    let promptRpc = null;
+    let text = '';
+    try {
+      const frames = this.controller.follow(
+        { address: { kind: 'session', sessionId }, assistantStream: false },
+        signal,
+      );
+      for await (const frame of frames) {
+        if (frame?.type === 'snapshot') {
+          // The stream opens with a snapshot, and whatever is inside it never
+          // arrives again as an event. When the window stops mid-turn (no closing
+          // `turn/end`), the prompt that opened that turn exists only here:
+          // dropping its `rpcId` makes this watcher read `ask()`'s own reply as a
+          // foreign turn and send the person a second copy. Text seen only in the
+          // window is still ignored on purpose — a turn this watcher never saw
+          // start is not one it may deliver.
+          text = '';
+          const records = Array.isArray(frame.records) ? frame.records : [];
+          for (let index = records.length - 1; index >= 0; index -= 1) {
+            const event = records[index]?.event;
+            if (event?.type === 'turn/end') break;
+            if (event?.type === 'user/message') {
+              promptRpc = String(event.data?.source?.rpcId ?? '');
+              break;
+            }
+          }
+          continue;
+        }
+        if (frame?.type !== 'event') continue;
+        const event = frame.event;
+        const type = event?.type;
+        if (type === 'user/message') {
+          promptRpc = String(event.data?.source?.rpcId ?? '');
+          text = '';
+          continue;
+        }
+        if (type === 'assistant/message') {
+          for (const block of event.data?.message?.content ?? []) {
+            if (block?.type === 'text' && typeof block.text === 'string') text += block.text;
+          }
+          continue;
+        }
+        if (type === 'turn/end') {
+          // No prompt seen at all is not proof of a foreign turn: stay quiet,
+          // because a missed injection is cheaper than a reply sent twice.
+          const owned = promptRpc === null || promptRpc.startsWith('qq-');
+          const body = text.trim();
+          promptRpc = null;
+          text = '';
+          if (owned || body === '') continue;
+          try {
+            await onText(body);
+          } catch (error) {
+            this.log(`external turn delivery failed: ${String(error?.message ?? error).slice(0, 120)}`);
+          }
+        }
+      }
+    } catch (error) {
+      if (!signal.aborted) {
+        this.log(`watcher for ${sessionId} stopped: ${String(error?.message ?? error).slice(0, 120)}`);
+      }
+    } finally {
+      this.watchers.delete(sessionId);
+    }
   }
 
   /**
@@ -134,12 +255,30 @@ export class DshDriver {
   async sessionFor(scene, cwd, tier = 'owner') {
     await this.map.load();
     const existing = this.map.get(scene);
+    this.debug(`sessionFor ${scene} existing=${existing ?? 'none'}`);
     if (typeof existing === 'string' && existing !== '') return existing;
+    // Concurrent asks for the same unbound scene must share one creation:
+    // otherwise a batch sync creates one session per request.
+    const running = this.pending.get(scene);
+    if (running !== undefined) return running;
+    const creation = this.#bindNew(scene, cwd, tier).finally(() => this.pending.delete(scene));
+    this.pending.set(scene, creation);
+    return creation;
+  }
 
-    const options = cwd === undefined || cwd === '' ? {} : { cwd };
+  /**
+   * Create a session for an unbound scene, bind it, and prepare it for turns.
+   *
+   * @param {string} scene Scene key.
+   * @param {string | undefined} cwd Workspace directory for a new session.
+   * @param {string} tier Tier that owns the session.
+   * @returns {Promise<string>} The session id.
+   */
+  async #bindNew(scene, cwd, tier) {
+    const options = await this.#sessionOptions(cwd);
     let sessionId;
     if (tier === 'owner' || this.guests === undefined) {
-      const created = await this.controller.create(options);
+      const created = await this.#create(options);
       sessionId = created.sessionId;
     } else {
       // Pre-generate the identity so `agent/created` can recognize the guest
@@ -147,7 +286,7 @@ export class DshDriver {
       const expected = `session-${randomUUID()}`;
       this.guests.expect(expected, tier);
       await this.guestStore?.set(expected, tier);
-      const created = await this.controller.create({ ...options, sessionId: expected });
+      const created = await this.#create(options, { sessionId: expected });
       sessionId = created.sessionId;
       if (sessionId !== expected) {
         this.guests.tiers.delete(expected);
@@ -158,6 +297,7 @@ export class DshDriver {
     }
 
     await this.map.set(scene, sessionId);
+    this.debug(`mapped ${scene} -> ${sessionId}`);
     // A fresh session inherits the deployment default, which can be a provider
     // without credentials. Pin a routable route right away so the first prompt
     // does not fail with "no API key".
@@ -176,6 +316,56 @@ export class DshDriver {
     await this.applyPermission?.(sessionId).catch(error => this.log(`permission preset failed: ${String(error?.message ?? error).slice(0, 120)}`));
     this.log(`bound ${scene} -> ${sessionId} (${tier})`);
     return sessionId;
+  }
+
+  /**
+   * Build the `session.create` options for a configured working directory.
+   *
+   * `session.create` accepts either `cwd` or `workspaceId`. With only `cwd` the
+   * host does not attach the session to any Workspace, so the sidebar files it
+   * under "Ungrouped" even though its files live in that directory. Resolving
+   * (or registering) the matching Workspace first keeps both true.
+   *
+   * @param {string | undefined} cwd Configured working directory.
+   * @returns {Promise<object>} Options for `controller.create`.
+   */
+  async #sessionOptions(cwd) {
+    if (cwd === undefined || cwd === '') return {};
+    const registry = typeof this.workspaces === 'function' ? this.workspaces() : this.workspaces;
+    if (registry === undefined || typeof registry.list !== 'function') return { cwd };
+    /** Compare paths the way Windows does: case- and trailing-separator-blind. */
+    const normalize = value => String(value ?? '').replace(/[\\/]+$/, '').toLowerCase();
+    try {
+      const target = normalize(cwd);
+      let workspace = registry.list().find(item => normalize(item.path) === target);
+      if (workspace === undefined && typeof registry.create === 'function') {
+        workspace = await registry.create(cwd);
+        this.log(`workspace ${workspace.id} created for ${cwd}`);
+      }
+      if (workspace !== undefined) return { workspaceId: workspace.id };
+    } catch (error) {
+      this.log(`workspace lookup failed, staying with cwd: ${String(error?.message ?? error).slice(0, 120)}`);
+    }
+    return { cwd };
+  }
+
+  /**
+   * Create a session, degrading to a plain `cwd` create if this Host rejects
+   * `workspaceId` on the plugin-facing controller.
+   *
+   * @param {object} options Base options.
+   * @param {object} [extra] Additional create options.
+   * @returns {Promise<{ sessionId: string }>} The created session.
+   */
+  async #create(options, extra = {}) {
+    try {
+      return await this.controller.create({ ...options, ...extra });
+    } catch (error) {
+      if (options.workspaceId === undefined) throw error;
+      this.log(`workspace create failed, retrying with cwd: ${String(error?.message ?? error).slice(0, 120)}`);
+      const { workspaceId: _ignored, ...rest } = options;
+      return await this.controller.create({ ...rest, ...extra });
+    }
   }
 
   /**
@@ -266,6 +456,7 @@ export class DshDriver {
     } catch (error) {
       if (!isMissingSession(error)) throw error;
       // The bound session vanished (deleted or never persisted): rebind once.
+      this.debug(`rebind ${request.scene} from ${sessionId}: ${String(error?.message ?? error).slice(0, 160)}`);
       this.log(`session ${sessionId} is gone; creating a new one`);
       await this.map.remove(request.scene);
       sessionId = await this.sessionFor(request.scene, request.cwd, request.tier ?? 'owner');

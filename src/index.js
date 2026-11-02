@@ -12,7 +12,10 @@ import { dirname, join } from 'node:path';
 import { ConfigStore, defaultConfigPath } from './config/store.js';
 import { mergeConfig } from './config/defaults.js';
 import { mergeIncomingConfig } from './config/merge.js';
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { createBackup, listBackups, removeBackup, pruneAutoBackups, backupDirectory } from './backup/pack.js';
+import { restoreBackup } from './backup/restore.js';
 import { pickRoute } from './llm/route.js';
 import { estimateCost, cacheRate } from './llm/cost.js';
 import { panelAccess } from './web/guard.js';
@@ -47,7 +50,71 @@ import { rawSendRefusal } from './policy/raw-send.js';
 export const inject = ['tools', 'sessionController', 'webServer'];
 
 /** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.85.2';
+const VERSION = '0.86.3';
+
+/** Largest backup a browser upload may carry. */
+const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
+
+/**
+ * Accept a backup file name, or return an empty string.
+ *
+ * Backup names arrive from the URL, so they must never contain a separator or a
+ * traversal segment: anything but a plain `*.zip` file name is rejected.
+ *
+ * @param {unknown} raw Value from the query string.
+ * @returns {string} Safe file name, or `''`.
+ */
+function safeBackupName(raw) {
+  const name = String(raw ?? '');
+  if (!/^[\w.-]+\.zip$/i.test(name) || name.includes('..')) return '';
+  return name;
+}
+
+/**
+ * Stream a request body into a file.
+ *
+ * `readBody` cuts everything past 8 KiB, which is fine for settings and useless
+ * for a 20 MB archive. This writes chunks straight to disk and reports a
+ * `0` result when the body exceeds `limit`.
+ *
+ * @param {import('node:http').IncomingMessage} req Incoming request.
+ * @param {string} file Destination path.
+ * @param {number} limit Maximum accepted bytes.
+ * @returns {Promise<number>} Bytes written, or 0 when the limit was exceeded.
+ */
+function receiveFile(req, file, limit) {
+  return new Promise((resolve, reject) => {
+    const output = createWriteStream(file);
+    let bytes = 0;
+    let settled = false;
+    const finish = value => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    req.on('data', chunk => {
+      if (settled) return;
+      bytes += chunk.length;
+      if (bytes > limit) {
+        req.destroy();
+        output.destroy();
+        finish(0);
+        return;
+      }
+      output.write(chunk);
+    });
+    req.on('end', () => {
+      if (settled) return;
+      output.end(() => finish(bytes));
+    });
+    req.on('error', error => {
+      if (settled) return;
+      settled = true;
+      output.destroy();
+      reject(error);
+    });
+  });
+}
 
 /** @type {ConfigStore | undefined} */
 let shared;
@@ -72,7 +139,10 @@ export function apply(ctx) {
   const log = line => console.log(`[dsh-to-qq] ${line}`);
   const store = configStore(error => log(`config: ${error.message}`));
   const stateDir = dirname(store.file);
-  const map = new SessionMap(join(stateDir, 'sessions.json'));
+  const mapDebug = line => {
+    void appendFile(join(stateDir, 'workspace-adopt.log'), `${new Date().toISOString()} ${line}\n`).catch(() => {});
+  };
+  const map = new SessionMap(join(stateDir, 'sessions.json'), mapDebug);
   const accounts = new AccountStore(join(stateDir, 'accounts.json'));
   const browserProfile = join(stateDir, 'browser-profile');
   void accounts.load().catch(error => log(`accounts load failed: ${error.message}`));
@@ -86,6 +156,11 @@ export function apply(ctx) {
   /** Event types seen during turns, so unknown shapes can be identified. */
   const eventTypes = new Set();
   const driver = new DshDriver({
+    // Temporary scene/session trace; every describe call writes here so a
+    // duplicate-session report can be diagnosed from one file.
+    debug: line => {
+      void appendFile(join(stateDir, 'workspace-adopt.log'), `${new Date().toISOString()} ${line}\n`).catch(() => {});
+    },
     chooseModel: async tier => {
       const catalog = await ctx.sessionController.modelCatalog();
       const settings = tier === 'owner' ? store.get().models.owner : store.get().models.member;
@@ -93,11 +168,30 @@ export function apply(ctx) {
       return route.provider === '' || route.model === '' ? undefined : route;
     },
     controller: ctx.sessionController,
+    // Lets a session created for `conversation.cwd` join that folder's
+    // Workspace instead of landing under "Ungrouped" in the sidebar. Resolved
+    // lazily: the registry service may not be loaded yet when this runs.
+    workspaceRegistry: () => ctx.get('workspaceRegistry'),
     // Rebuilding hides the replaced session instead of leaving a new sidebar row.
-    archiveSession: async sessionId => {
+    // The registry reports an archived set (it throws only when it refuses), so
+    // log the outcome until the sidebar behaviour is confirmed on a live Host.
+    archiveSession: async (sessionId, options = {}) => {
+      const trace = line => {
+        void appendFile(join(stateDir, 'workspace-adopt.log'), `${new Date().toISOString()} ${line}\n`).catch(() => {});
+      };
       const registry = ctx.get('workspaceRegistry');
-      if (registry === undefined || typeof registry.archiveSession !== 'function') return;
-      await registry.archiveSession(sessionId);
+      if (registry === undefined || typeof registry.archiveSession !== 'function') {
+        trace(`archive ${sessionId}: registry=${registry === undefined ? 'none' : typeof registry} method=${registry === undefined ? 'n/a' : typeof registry.archiveSession}`);
+        return { ok: false, error: 'workspace registry unavailable' };
+      }
+      try {
+        const result = await registry.archiveSession(sessionId, { stopActivity: true, ...options });
+        trace(`archive ${sessionId}: result=${result === undefined ? 'undefined' : JSON.stringify(result).slice(0, 120)} set=${JSON.stringify(registry.archivedSessionIds ?? null).slice(0, 200)}`);
+        return result === undefined ? { ok: true } : result;
+      } catch (error) {
+        trace(`archive ${sessionId}: threw ${String(error?.message ?? error).slice(0, 200)}`);
+        throw error;
+      }
     },
     applyPermission: async sessionId => {
       const preset = store.get().models.permissionPreset;
@@ -127,6 +221,58 @@ export function apply(ctx) {
     onToolCall: data => bridge.noteToolCall(data),
   });
   const approvals = new Approvals(store.get().safety.confirmTtlMs);
+  /**
+   * Ensure the configured working directory exists as a Workspace and pull the
+   * already-bound QQ sessions into it.
+   *
+   * Sessions created with `cwd` alone are never attached to a Workspace, so DM
+   * bindings that predate the workspace change sit under "Ungrouped" forever.
+   * This runs once per activation and is idempotent.
+   */
+  const note = (...parts) => {
+    const line = `${new Date().toISOString()} ${parts.map(String).join(' ')}\n`;
+    void appendFile(join(stateDir, 'workspace-adopt.log'), line).catch(() => {});
+  };
+  const adoptWorkspace = async () => {
+    // apply() runs before the config file has been read; without this the
+    // configured cwd looks empty and adoption bails out.
+    await store.load().catch(() => {});
+    const cwd = store.get().conversation.cwd;
+    if (typeof cwd !== 'string' || cwd === '') return;
+    const registry = ctx.get('workspaceRegistry');
+    if (registry === undefined || typeof registry.list !== 'function') { note('no registry'); return; }
+    const normalize = value => String(value ?? '').replace(/[\\/]+$/, '').toLowerCase();
+    let workspace = registry.list().find(item => normalize(item.path) === normalize(cwd));
+    if (workspace === undefined && typeof registry.create === 'function') {
+      workspace = await registry.create(cwd);
+      log(`workspace ${workspace.id} created for ${cwd}`);
+    }
+    if (workspace === undefined || typeof workspace.attachSession !== 'function') { note('no attach method'); return; }
+    await map.load();
+    const ids = Object.values(map.all()).filter(id => typeof id === 'string' && id !== '');
+    for (const sessionId of ids) {
+      if (Array.isArray(workspace.sessionIds) && workspace.sessionIds.includes(sessionId)) continue;
+      try {
+        await workspace.attachSession(sessionId);
+        log(`attached ${sessionId} to workspace ${workspace.id}`);
+      } catch (error) {
+        log(`attach ${sessionId} failed: ${String(error?.message ?? error).slice(0, 120)}`);
+        note('failed', sessionId, String(error?.message ?? error).slice(0, 200));
+      }
+    }
+  };
+  // The registry service loads with the Host, not necessarily before apply().
+  void (async () => {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      if (ctx.get('workspaceRegistry') !== undefined) {
+        await adoptWorkspace();
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    log('workspace registry never appeared; sessions stay ungrouped');
+  })().catch(error => log(`workspace adoption failed: ${String(error?.message ?? error).slice(0, 120)}`));
+
   /**
    * Summarize one impression prompt with the configured model route.
    *
@@ -339,9 +485,40 @@ export function apply(ctx) {
       .then(() => rename(temporary, quotaFile))
       .catch(error => log(`quota save failed: ${error?.message ?? error}`));
   }, 30_000);
+
+  // At most one automatic backup per day. The panel can always make one by hand;
+  // this exists so a machine that dies in the night still has yesterday's state.
+  const autoBackup = async () => {
+    const config = store.get().backup ?? {};
+    if (config.auto !== true) return;
+    const rows = (await listBackups(stateDir)).filter(row => row.kind === 'auto');
+    const newest = rows[0];
+    if (newest !== undefined && Date.now() - Date.parse(newest.mtime) < 24 * 3600_000) return;
+    if (bridge.archive === null || bridge.archive === undefined) return;
+    const info = await createBackup({
+      stateDir,
+      archive: bridge.archive,
+      memory,
+      stickers,
+      kind: 'auto',
+      includeMedia: config.includeMedia === true,
+      includeCookies: config.includeCookies !== false,
+      version: VERSION,
+      log,
+    });
+    log(`auto backup ${info.name} (${(info.bytes / 1048576).toFixed(2)} MB)`);
+    await pruneAutoBackups(stateDir, config.keep);
+  };
+  schedule(() => {
+    void autoBackup().catch(error => log(`auto backup failed: ${error?.message ?? error}`));
+  }, 120_000, { once: true });
+  schedule(() => {
+    void autoBackup().catch(error => log(`auto backup failed: ${error?.message ?? error}`));
+  }, 10 * 60_000);
+
   // Calling the OneBot API directly bypasses the bridge: nothing is archived, the
-// tier rules are skipped, and a file can be delivered twice.
-ctx.effect(() => ctx.tools.guard(execution => {
+  // tier rules are skipped, and a file can be delivered twice.
+  ctx.effect(() => ctx.tools.guard(execution => {
   if (execution?.name !== 'pwsh') return undefined;
   const refusal = rawSendRefusal(String(execution?.arguments?.command ?? ''));
   if (refusal !== undefined) {
@@ -1036,6 +1213,129 @@ ctx.effect(() => ctx.tools.guard(execution => {
         const scene = url.searchParams.get('scene') ?? '';
         const limit = Number(url.searchParams.get('limit') ?? '50');
         send(200, { scene, messages: bridge.archive?.recent(scene, limit) ?? [] });
+        return;
+      }
+      if (url.pathname === '/dsh-to-qq/api/backups') {
+        if (req.method === 'GET') {
+          send(200, {
+            backups: await listBackups(stateDir),
+            directory: backupDirectory(stateDir),
+            settings: store.get().backup ?? {},
+          });
+          return;
+        }
+        if (req.method === 'DELETE') {
+          const name = safeBackupName(url.searchParams.get('name'));
+          if (name === '') {
+            send(400, { error: 'invalid backup name' });
+            return;
+          }
+          const removed = await removeBackup(stateDir, name);
+          if (removed) send(200, { ok: true, name });
+          else send(404, { error: 'backup not found' });
+          return;
+        }
+      }
+      if (url.pathname === '/dsh-to-qq/api/backup' && req.method === 'POST') {
+        const config = store.get().backup ?? {};
+        const backup = await createBackup({
+          stateDir,
+          archive: bridge.archive,
+          memory,
+          stickers,
+          kind: 'manual',
+          includeMedia: config.includeMedia === true,
+          includeCookies: config.includeCookies !== false,
+          version: VERSION,
+          log,
+        });
+        void pruneAutoBackups(stateDir, config.keep).catch(error => log(`backup prune failed: ${error?.message ?? error}`));
+        send(200, { backup });
+        return;
+      }
+      if (url.pathname === '/dsh-to-qq/api/backup/download' && req.method === 'GET') {
+        const name = safeBackupName(url.searchParams.get('name'));
+        if (name === '') {
+          send(400, { error: 'invalid backup name' });
+          return;
+        }
+        const file = join(backupDirectory(stateDir), name);
+        const info = await stat(file).catch(() => null);
+        if (info === null || !info.isFile()) {
+          send(404, { error: 'backup not found' });
+          return;
+        }
+        res.writeHead(200, {
+          'content-type': 'application/zip',
+          'content-length': info.size,
+          'content-disposition': `attachment; filename="${name}"`,
+          'cache-control': 'no-store',
+        });
+        createReadStream(file).pipe(res);
+        return;
+      }
+      if (url.pathname === '/dsh-to-qq/api/backup/upload' && req.method === 'POST') {
+        const name = safeBackupName(url.searchParams.get('name'));
+        if (name === '') {
+          send(400, { error: 'invalid backup name' });
+          return;
+        }
+        await mkdir(backupDirectory(stateDir), { recursive: true });
+        const file = join(backupDirectory(stateDir), name);
+        const bytes = await receiveFile(req, file, MAX_UPLOAD_BYTES);
+        if (bytes === 0) {
+          await rm(file, { force: true }).catch(() => {});
+          send(413, { error: 'backup is too large or the upload was interrupted' });
+          return;
+        }
+        send(200, { ok: true, name, bytes });
+        return;
+      }
+      if (url.pathname === '/dsh-to-qq/api/restore' && req.method === 'POST') {
+        let body = {};
+        try {
+          body = JSON.parse(await readBody(req) || '{}');
+        } catch {
+          send(400, { error: 'invalid JSON body' });
+          return;
+        }
+        const name = safeBackupName(body.name);
+        const custom = typeof body.path === 'string' ? body.path.trim() : '';
+        const file = name !== '' ? join(backupDirectory(stateDir), name) : custom;
+        if (file === '') {
+          send(400, { error: 'name or path is required' });
+          return;
+        }
+        const info = await stat(file).catch(() => null);
+        if (info === null || !info.isFile()) {
+          send(404, { error: 'backup not found' });
+          return;
+        }
+        if (info.size > MAX_UPLOAD_BYTES) {
+          send(413, { error: 'backup is too large' });
+          return;
+        }
+        const result = await restoreBackup({
+          buffer: await readFile(file),
+          name: name !== '' ? name : file,
+          stateDir,
+          version: VERSION,
+          dryRun: body.dryRun === true,
+          clearBindings: body.clearBindings === true,
+          bridge,
+          archive: bridge.archive,
+          openArchive,
+          memory,
+          stickers,
+          map,
+          guestStore,
+          accounts,
+          store,
+          quota: bridge.quota,
+          log,
+        });
+        log(`restore ${result.dryRun === true ? 'dry-run' : 'applied'}: ${name !== '' ? name : file}`);
+        send(200, result);
         return;
       }
       send(404, { error: 'unknown endpoint' });

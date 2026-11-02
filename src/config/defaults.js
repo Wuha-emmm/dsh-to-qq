@@ -156,6 +156,16 @@ export function defaults() {
   /** Media files age out faster than the rows that reference them. */
   mediaRetentionDays: 7,
     },
+    backup: {
+      /** Snapshot the state directory once a day, without being asked. */
+      auto: true,
+      /** How many automatic backups to keep; manual ones are never pruned. */
+      keep: 7,
+      /** Include sticker previews and saved attachments (larger, slower). */
+      includeMedia: false,
+      /** Include signed-in account cookies so a new machine stays logged in. */
+      includeCookies: true,
+    },
     stickers: {
       /** Offer the sticker catalog to the model and allow sending. */
       enabled: true,
@@ -226,6 +236,7 @@ export const RANGES = {
   'output.width': [600, 2000],
   'archive.retentionDays': [0, 3650],
   'archive.mediaRetentionDays': [0, 3650],
+  'backup.keep': [1, 365],
   'connection.botUin': [0, 99999999999],
   'safety.confirmTtlMs': [10_000, 600_000],
   'safety.toolGrantMinutes': [1, 120],
@@ -306,6 +317,9 @@ export function normalize(config) {
   if (typeof config.output.sendTypingStatus !== 'boolean') config.output.sendTypingStatus = true;
   if (typeof config.ui.pet !== 'boolean') config.ui.pet = true;
   if (typeof config.ui.petId !== 'string' || config.ui.petId === '') config.ui.petId = 'main';
+  for (const key of ['auto', 'includeMedia', 'includeCookies']) {
+    if (typeof config.backup?.[key] !== 'boolean') config.backup[key] = defaults().backup[key];
+  }
   for (const tier of ['owner', 'member', 'summarizer']) {
     const route = config.models[tier];
     if (route === null || typeof route !== 'object') config.models[tier] = { provider: '', model: '', effort: '' };

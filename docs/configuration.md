@@ -136,6 +136,15 @@
 | `retentionDays` | `30` | `0 ~ 3650` | 档案与媒体的保留天数（0 = 永久） |
 | `mediaRetentionDays` | `7` | `0 ~ 3650` |  |
 
+## backup
+
+| 键 | 默认值 | 范围 | 说明 |
+|---|---|---|---|
+| `auto` | `true` | — |  |
+| `keep` | `7` | `1 ~ 365` |  |
+| `includeMedia` | `false` | — |  |
+| `includeCookies` | `true` | — |  |
+
 ## stickers
 
 | 键 | 默认值 | 范围 | 说明 |

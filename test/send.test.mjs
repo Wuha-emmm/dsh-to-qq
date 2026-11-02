@@ -45,13 +45,13 @@ test('a picture with a caption waits for the reply', async () => {
   assert.equal(log.sent.length, 0);
 });
 
-test('a long caption is cut and the report says so', async () => {
+test('a long caption is kept whole and merged with the reply', async () => {
   const log = { queue: [], sent: [] };
   const tool = register(log);
   const long = '特勤处到了：技术中心 Lv.3、工作台 Lv.3、制药台 Lv.3、防具台 Lv.3，右边仓库 Lv.10';
   const result = await tool.execute({ text: long, image: 'E:\\tmp\\a.png' }, { agent: { id: 's1' } });
-  assert.match(result.report, /超过 30 字/);
-  assert.equal(log.queue[0].item.caption.length, 31);
+  assert.doesNotMatch(result.report, /超过 30 字/);
+  assert.equal(log.queue[0].item.caption, long);
 });
 
 test('a picture without text goes out immediately', async () => {

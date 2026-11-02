@@ -450,6 +450,21 @@ class Archive {
     return { messages: Number(messages), bytes: Number(pageSize) * Number(pageCount) };
   }
 
+  /**
+   * Write a consistent copy of the database to `file`.
+   *
+   * The archive runs in WAL mode, so copying `archive.db` on its own can miss
+   * pages still living in the `-wal` file. `VACUUM INTO` produces a single
+   * self-contained database with the same rows, which is what a backup needs.
+   *
+   * @param {string} file Destination path; must not exist.
+   * @returns {void}
+   */
+  snapshotTo(file) {
+    const target = String(file).replace(/'/g, "''");
+    this.db.exec(`VACUUM INTO '${target}'`);
+  }
+
   /** Close the connection. */
   close() {
     try {

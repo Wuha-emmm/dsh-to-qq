@@ -7,6 +7,7 @@
  */
 
 import { renderCard } from '../memory/store.js';
+import { sanitizeNote } from '../memory/sensitive.js';
 
 /**
  * Register the four memory tools.
@@ -69,8 +70,15 @@ export function registerMemoryTools(ctx, options) {
     async execute(args, exec) {
       const qq = ownerOf(exec);
       const limit = options.limits().summaryLimit;
-      const card = await options.store.addNote(qq, args.text, limit);
-      options.log(`memory note for ${qq}: ${String(args.text).slice(0, 40)}`);
+      // Refuse at the write: a card is rendered into prompts and shared, so a
+      // privacy or work record must never be stored in the first place.
+      const clean = sanitizeNote(args.text);
+      if (clean.dropped) {
+        options.log(`memory note refused for ${qq}: sensitive or work record`);
+        return { report: '这条涉及隐私或工作记录，没有写进记忆卡。', notes: options.store.get(qq).notes.length };
+      }
+      const card = await options.store.addNote(qq, clean.text, limit);
+      options.log(`memory note for ${qq}: ${String(clean.text).slice(0, 40)}`);
       return { report: `已记下。当前 ${card.notes.length} 条。`, notes: card.notes.length };
     },
     presentCall: () => ({ card: 'generic', title: 'Remember', kind: 'other', rawInput: {} }),

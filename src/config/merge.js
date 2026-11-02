@@ -7,7 +7,7 @@
  */
 
 /** Sections the settings surface may write. */
-const SECTION_KEYS = ['connection', 'access', 'models', 'conversation', 'memory', 'limits', 'output', 'archive', 'digest', 'safety', 'ui'];
+const SECTION_KEYS = ['connection', 'access', 'models', 'conversation', 'memory', 'limits', 'output', 'archive', 'backup', 'digest', 'safety', 'ui'];
 
 /** Placeholder the panel uses when it knows a token exists but not its value. */
 const MASK = '***';

@@ -50,6 +50,9 @@ const SEEN_LIMIT = 800;
 /** Chunk size for one QQ text message. */
 const CHUNK_LIMIT = 1500;
 
+/** How long a delivered body stays recognizable, so a second copy is dropped. */
+const RECENT_DELIVERY_MS = 15_000;
+
 /** Hard cap on buffered lines per scene, above every configured window. */
 /**
  * Token literal, or the value of the configured environment variable.
@@ -136,11 +139,11 @@ export class Bridge {
     // One sticker at a time is allowed: the settings page can re-analyse just the
     const only = typeof options.md5 === 'string' ? options.md5.toLowerCase() : '';
     const workers = this.stickers.all().filter(sticker => sticker.url !== '' && (only === '' || sticker.md5 === only));
-    // Descriptions are independent: a fresh session per batch is enough, and
-    // stops a 130-turn session from re-sending every earlier reply each turn.
+    // Descriptions are independent, so one long-lived helper session serves
+    // every batch. Resetting it per batch used to leave a fresh sidebar row on
+    // each sync; DSH's own compaction keeps the accumulated turns cheap, and
+    // `rebuildScene` still replaces the session when a human asks for it.
     const stickerScene = 'sticker-describe';
-    const resetStickerSession = async () => { const previous = this.map?.get?.(stickerScene); await this.map?.remove?.(stickerScene); await this.#archiveReplaced(previous); };
-    await resetStickerSession();
     let previewed = 0;
     let described = 0;
     let repairs = 0;
@@ -205,8 +208,6 @@ export class Bridge {
         this.log(`sticker media failed for ${sticker.md5.slice(0, 6)}: ${this.stickerStats.lastError}`);
       }
     }
-
-    await resetStickerSession();
 
     this.stickerStats.total = this.stickers.size;
     await this.stickers.save().catch(error => this.log(`sticker save failed: ${error?.message ?? error}`));
@@ -381,10 +382,14 @@ export class Bridge {
     this.rebuildMarks = new Map();
     /** Last reply text per scene, so a bare "啥意思" can point at it. */
     this.lastReply = new Map();
+    /** Scene -> [{ body, at }] turn deliveries of the last few seconds, pictures included. */
+    this.recentDeliveries = new Map();
     /** Scene -> epoch ms of the last automatic rebuild, so a pass cannot thrash. */
     this.autoRebuiltAt = new Map();
     /** Per-scene injection state: which fixed blocks the session already has. */
     this.injections = new Map();
+    /** Sessions followed for host-injected turns (subagent reports, timers). */
+    this.watchedSessions = new Set();
     /** Directory for rebuilds.json; empty disables persistence. */
     this.stateDir = options.stateDir ?? '';
     this.titledSessions = new Set();
@@ -1350,6 +1355,9 @@ export class Bridge {
           if (tracker !== undefined) tracker.sessionId = String(sessionId);
           this.senders.set(sessionId, message.senderId);
           this.sessionDetails.set(sessionId, { qq: message.senderId, scene: message.scene, tier });
+          // Subagent reports and timers run turns in this session without a QQ
+          // message, so follow it for good and deliver those turns ourselves.
+          this.#watchSession(sessionId, message.scene);
           // While this turn runs, watch for questions the Host is waiting on.
           this.#startQuestionPoll(message, sessionId);
           // Name the session after the conversation, once per session.
@@ -1398,6 +1406,7 @@ export class Bridge {
         if (merged) {
           this.counters.answered += 1;
           this.lastReply.set(message.scene, rawBody);
+          this.#noteDelivery(message.scene, [rawBody]);
           replyChars = rawBody.length;
           turnOk = true;
           this.log(`answered ${message.scene} (${tier}) with media`);
@@ -1410,6 +1419,7 @@ export class Bridge {
         }
         this.recordOutbound(message, body, undefined, result.reasoning);
       }
+      this.#noteDelivery(message.scene, [body]);
       this.counters.answered += 1;
       this.lastReply.set(message.scene, body);
       replyChars = body.length;
@@ -1527,7 +1537,13 @@ export class Bridge {
     if (typeof sessionId !== 'string' || sessionId === '') return;
     if (this.store.get().conversation.archiveOldSessions === false) return;
     try {
-      await this.archiveSession?.(sessionId);
+      const result = await this.archiveSession?.(sessionId);
+      // WorkspaceController answers a refusal in the result instead of throwing;
+      // treating that as success left every replaced session visible.
+      if (result !== undefined && result?.ok === false) {
+        const reason = result.rpcError?.message ?? result.error?.message ?? result.error ?? 'refused';
+        throw new Error(String(reason));
+      }
       this.log(`archived replaced session ${sessionId}`);
     } catch (error) {
       this.log(`archive ${sessionId} failed: ${String(error?.message ?? error).slice(0, 100)}`);
@@ -1805,6 +1821,80 @@ export class Bridge {
     return fresh;
   }
 
+  /**
+   * Follow a session so a turn started outside QQ still reaches the chat.
+   *
+   * @param {string} sessionId Bound session.
+   * @param {string} scene Scene it belongs to.
+   * @returns {void}
+   */
+  #watchSession(sessionId, scene) {
+    const id = String(sessionId ?? '');
+    if (id === '' || this.watchedSessions.has(id)) return;
+    if (typeof this.driver?.watch !== 'function') return;
+    this.watchedSessions.add(id);
+    this.driver.watch(id, text => this.#deliverForeign(id, scene, text));
+  }
+
+  /**
+   * Deliver the text of a turn this bridge did not start.
+   *
+   * A subagent finishing, a timer or a system notice runs a turn inside the
+   * bound session but has no QQ message, so the normal reply path never fires.
+   * The scene is all we have to send with; the text is chunked like any reply.
+   *
+   * @param {string} sessionId Session the turn ran in.
+   * @param {string} scene Scene key (`dm:<qq>` or `group:<id>`).
+   * @param {string} text Model text for that turn.
+   * @returns {Promise<void>} Resolves after delivery.
+   */
+  async #deliverForeign(sessionId, scene, text) {
+    const body = String(text ?? '').trim();
+    if (body === '' || this.client === undefined) return;
+    const [kind, rawPeer] = String(scene).split(':');
+    const peerId = Number(rawPeer) || 0;
+    if (peerId <= 0) return;
+    // A scene that was rebound to another session must not be answered by the
+    // old watcher; the current binding wins.
+    if (String(this.map?.get?.(scene) ?? '') !== sessionId) return;
+    // `ask()` is still finishing this scene's turn, so its reply has not left yet:
+    // whatever the watcher saw is that same turn, and sending it now would put the
+    // answer in the chat twice.
+    if (this.busy.has(scene)) {
+      this.log(`dropped a watcher delivery for ${scene}: its own turn is still in flight`);
+      return;
+    }
+    // Defense in depth, and the only check that covers pictures: a long reply
+    // leaves as one PNG, so an identical body just delivered in any form is a
+    // duplicate rather than a new answer.
+    if (this.#justDelivered(scene, body)) {
+      this.log(`dropped a duplicate turn delivery for ${scene} (${body.length} chars)`);
+      return;
+    }
+    const isGroup = kind === 'group';
+    const message = {
+      scene,
+      kind: isGroup ? 'group' : 'dm',
+      peerId,
+      groupId: isGroup ? peerId : 0,
+      selfId: this.selfId ?? 0,
+      senderId: this.selfId ?? 0,
+      senderName: 'DSH',
+      text: body,
+      segments: [],
+      messageId: '',
+    };
+    for (const chunk of chunkText(body, CHUNK_LIMIT)) {
+      await this.sendText(message, chunk, { record: false });
+      await sleep(250);
+    }
+    this.recordOutbound(message, body);
+    this.#noteDelivery(scene, [body]);
+    this.lastReply.set(scene, body);
+    this.counters.answered += 1;
+    this.log(`delivered a turn that did not come from QQ: ${scene} (${body.length} chars)`);
+  }
+
   #cardBlock(message, injection) {
     if (this.memory === undefined) return '';
     const card = this.memory.get(message.senderId);
@@ -1983,6 +2073,8 @@ export class Bridge {
         : { group_id: message.groupId, message: [{ type: 'image', data: { file: payload } }] };
       await this.client.call(action, params, { timeoutMs: 30_000 });
       this.recordOutbound(message, `[图片] 长回复 ${body.length} 字`, 'image', reasoning);
+      // The picture is the reply: a text copy of it is a duplicate, not a second answer.
+      this.#noteDelivery(message.scene, [body]);
       return true;
     } catch (error) {
       this.log(`image reply failed, falling back to text: ${error?.message ?? error}`);
@@ -2087,6 +2179,7 @@ export class Bridge {
       await this.client.call(upload, { ...params, file: item.file, name }, { timeoutMs: 60_000 });
     }
     this.recordOutbound(message, text === '' ? '[图片]' : text, images.length > 0 ? 'image' : undefined);
+    this.#noteDelivery(message.scene, [text]);
     for (const item of items) if (item.image !== '') await disposeUploadCopy(item.image);
     this.log(`media flushed with reply for ${message.scene} (${images.length} image(s), ${files.length} file(s))`);
     return true;
@@ -2153,6 +2246,47 @@ export class Bridge {
       mediaKind,
       reasoning,
     });
+  }
+
+  /**
+   * Remember one turn delivery long enough to recognize its duplicate copy.
+   *
+   * A reply can reach two send paths — the answer itself and the standing watcher
+   * for turns nobody asked for — and whichever copy is second must not go out.
+   * Pictures count: a long reply leaves as a single PNG, so the text that
+   * produced it is recorded beside the text that actually went out.
+   *
+   * @param {string} scene Scene key.
+   * @param {ReadonlyArray<string>} texts What reached the person, as text.
+   * @returns {void}
+   */
+  #noteDelivery(scene, texts) {
+    const now = Date.now();
+    const list = (this.recentDeliveries.get(scene) ?? []).filter(entry => now - entry.at < RECENT_DELIVERY_MS);
+    for (const text of texts) {
+      const body = String(text ?? '').trim();
+      if (body !== '') list.push({ body, at: now });
+    }
+    if (list.length === 0) {
+      this.recentDeliveries.delete(scene);
+      return;
+    }
+    this.recentDeliveries.set(scene, list.slice(-6));
+  }
+
+  /**
+   * Whether this exact body just left for the scene.
+   *
+   * @param {string} scene Scene key.
+   * @param {string} text Candidate body.
+   * @returns {boolean} True when an identical body went out moments ago.
+   */
+  #justDelivered(scene, text) {
+    const body = String(text ?? '').trim();
+    if (body === '') return false;
+    const now = Date.now();
+    return (this.recentDeliveries.get(scene) ?? [])
+      .some(entry => now - entry.at < RECENT_DELIVERY_MS && entry.body === body);
   }
 
   /**

@@ -20,6 +20,13 @@ export const HARD_PATTERNS = [
   /(截图|截屏|screenshot|录屏)/i,
   // Phone numbers.
   /(?:^|\D)1[3-9]\d{9}(?:\D|$)/,
+  // Where the person lives: a card is shared, so the place stays out.
+  /(住址|居住地址|家庭地址|家庭住址|老家在哪|门牌|小区|楼栋|单元号|号楼|\d+\s*栋)/,
+  /(身份证|证件号|工号|学号|车牌|驾驶证)/,
+  /(邮箱|email|e-mail)/i,
+  /(手机号|电话号)/i,
+  // Work records: the owner does not want shifts, units or job numbers on a card.
+  /(单位|公司|车间|班组|工区|岗位|排班|值班|月修|检修|工位号|任职|就职)/,
 ];
 
 /** A local absolute path: keep the fact, hide the layout. */
