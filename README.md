@@ -4,7 +4,7 @@
 
 > Bridge between QQ and DeepSeek Harness. Owner DMs get full local access; group mentions stay read-only.
 
-`Node ≥ 22` · `MIT` · 零 npm 运行时依赖 · 单测 371 条
+`Node ≥ 22` · `MIT` · 零 npm 运行时依赖 · 单测 377 条
 
 ---
 

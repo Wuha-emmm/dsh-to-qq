@@ -20,6 +20,8 @@ class FakeController {
     this.queue = [];
     this.waiters = [];
     this.cursor = 100;
+    /** Records the opening snapshot carries, for recovery tests. */
+    this.snapshotRecords = options.snapshotRecords ?? [];
   }
 
   async create() {
@@ -57,7 +59,7 @@ class FakeController {
   follow(_request, signal) {
     const self = this;
     return (async function* follow() {
-      yield { type: 'snapshot', cursor: self.cursor - 10, records: [], hasMore: false, projections: {} };
+      yield { type: 'snapshot', cursor: self.cursor - 10, records: self.snapshotRecords, hasMore: false, projections: {} };
       while (!signal?.aborted) {
         const event = await self.next(signal);
         if (event === undefined) return;
@@ -251,4 +253,58 @@ test('a host-injected turn is handed to the watcher, a QQ turn is not', async ()
   assert.deepEqual(delivered, ['子智能体跑完了'], 'a QQ turn must not be delivered twice');
 
   driver.unwatch('s1');
+});
+
+test('ask reports the request id once the Host owns the turn', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-to-qq-'));
+  try {
+    const controller = new FakeController();
+    const driver = new DshDriver({ controller, map: new SessionMap(join(dir, 'sessions.json')) });
+    const seen = [];
+    await driver.ask({
+      scene: 'dm:7',
+      text: 'hi',
+      timeoutMs: 2000,
+      onPrompt: info => seen.push(info),
+    });
+    assert.equal(seen.length, 1, 'one accepted prompt means one ownership report');
+    assert.match(seen[0].requestId, /^qq-/);
+    assert.equal(seen[0].sessionId, 's1');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('recoverTurn reads a lost turn back by its request id', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-to-qq-'));
+  try {
+    const controller = new FakeController();
+    controller.snapshotRecords = [
+      { event: { type: 'user/message', seq: 1, data: { source: { rpcId: 'qq-old' } } } },
+      { event: { type: 'assistant/message', seq: 2, data: { message: { content: [{ type: 'text', text: '上一条' }] } } } },
+      { event: { type: 'turn/end', seq: 3, data: { reason: { kind: 'completed' } } } },
+      { event: { type: 'user/message', seq: 4, data: { source: { rpcId: 'qq-lost' } } } },
+      { event: { type: 'assistant/message', seq: 5, data: { message: { content: [{ type: 'text', text: '老爹，我这不是一直没死嘛' }] } } } },
+      { event: { type: 'turn/end', seq: 6, data: { reason: { kind: 'completed' } } } },
+    ];
+    const driver = new DshDriver({ controller, map: new SessionMap(join(dir, 'sessions.json')) });
+
+    assert.deepEqual(await driver.recoverTurn('s1', 'qq-lost', 100), { text: '老爹，我这不是一直没死嘛' });
+    assert.equal(await driver.recoverTurn('s1', 'qq-unknown', 50), null, 'another turn must not be replayed');
+
+    // The window may stop mid-turn while the Host is still finishing it: the
+    // closing events then arrive live, and the text is assembled from there.
+    controller.snapshotRecords = controller.snapshotRecords.slice(3, 5);
+    const pending = driver.recoverTurn('s1', 'qq-lost', 2000);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    controller.push({
+      type: 'assistant/message',
+      seq: 7,
+      data: { message: { content: [{ type: 'text', text: '，没死透' }] } },
+    });
+    controller.push({ type: 'turn/end', seq: 8, data: { reason: { kind: 'completed' } } });
+    assert.deepEqual(await pending, { text: '老爹，我这不是一直没死嘛，没死透' });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

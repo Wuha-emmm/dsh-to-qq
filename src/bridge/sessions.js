@@ -590,6 +590,10 @@ export class DshDriver {
       }
     }
 
+    // The Host owns the turn from here on: tell the bridge which request it was,
+    // so a reload before the reply can be repaired by the next instance.
+    request.onPrompt?.({ sessionId, requestId });
+
     let timer;
     const outcome = await Promise.race([
       completion,
@@ -617,6 +621,82 @@ export class DshDriver {
     const failure = turnReason?.kind === 'error' ? turnReason.error?.message : undefined;
     if (text === '' && failure !== undefined) throw new Error(`agent failed: ${failure}`);
     return { sessionId, text, reasoning: reasoning.trim(), sessionBound: true, usage, searchCalls, fetchCalls, compacted };
+  }
+
+  /**
+   * Read back the text of a turn `ask()` started but never delivered.
+   *
+   * A reload can dispose the instance between the Host's `turn/end` and the code
+   * that posts the reply: the model's answer exists in the session, nobody sends
+   * it, and no error is raised. The turn still carries the `qq-` request id it
+   * was started with, so the next instance can recognize it — in the opening
+   * snapshot when it already closed, in the live stream when the Host is still
+   * finishing it — instead of guessing from text it never saw.
+   *
+   * @param {string} sessionId Session to read.
+   * @param {string} requestId Request id the turn was started with.
+   * @param {number} [timeoutMs] How long to wait for the turn to close.
+   * @returns {Promise<{ text: string } | null>} The turn's text, or null when it cannot be read back.
+   */
+  async recoverTurn(sessionId, requestId, timeoutMs = 60_000) {
+    const id = String(sessionId ?? '');
+    const owner = String(requestId ?? '');
+    if (id === '' || owner === '') return null;
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), timeoutMs);
+    timer.unref?.();
+    let text = '';
+    let opened = false;
+    /**
+     * Fold one event into the turn being read.
+     *
+     * @param {any} event The event.
+     * @returns {string | undefined} The turn's text once it closed, else undefined.
+     */
+    const apply = event => {
+      const type = event?.type;
+      if (type === 'user/message') {
+        // A later prompt closes this turn's claim: only the request id that
+        // opened the turn may speak for it.
+        opened = String(event.data?.source?.rpcId ?? '') === owner;
+        text = '';
+        return undefined;
+      }
+      if (opened !== true) return undefined;
+      if (type === 'assistant/message') {
+        for (const block of event.data?.message?.content ?? []) {
+          if (block?.type === 'text' && typeof block.text === 'string') text += block.text;
+        }
+        return undefined;
+      }
+      if (type === 'turn/end') return text.trim();
+      return undefined;
+    };
+    try {
+      const frames = this.controller.follow(
+        { address: { kind: 'session', sessionId: id }, assistantStream: false },
+        abort.signal,
+      );
+      for await (const frame of frames) {
+        if (frame?.type === 'snapshot') {
+          for (const record of Array.isArray(frame.records) ? frame.records : []) {
+            const closed = apply(record?.event ?? record);
+            if (closed !== undefined) return closed === '' ? null : { text: closed };
+          }
+          // The window may stop mid-turn; the closing event then arrives live.
+          continue;
+        }
+        if (frame?.type !== 'event') continue;
+        const closed = apply(frame.event);
+        if (closed !== undefined) return closed === '' ? null : { text: closed };
+      }
+      return null;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+      abort.abort();
+    }
   }
 }
 

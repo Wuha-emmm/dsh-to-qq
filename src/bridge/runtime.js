@@ -8,6 +8,7 @@
  */
 
 import { OneBotClient } from '../transport/onebot.js';
+import { PendingTurns } from './pending-turns.js';
 import { normalizeEvent, chunkText, flattenSegments } from './events.js';
 import { normalizeRequestEvent, describeRequest } from './requests.js';
 import { buildReplySegments, memberNames } from './mentions.js';
@@ -366,6 +367,12 @@ export class Bridge {
     this.seen = new Set();
     /** Scenes with a turn in flight, so one scene never interleaves two turns. */
     this.busy = new Set();
+    /** Turns on disk until delivery is confirmed, so a reload can repair them. */
+    this.pendingTurns = typeof options.stateDir === 'string' && options.stateDir !== ''
+      ? new PendingTurns(join(options.stateDir, 'pending-turns.json'))
+      : null;
+    /** True once leftovers were looked for: recovery runs once per process. */
+    this.recoveryStarted = false;
     this.buffer = new SceneBuffer(BUFFER_LIMIT);
     /** Scene -> last backfill attempt, so a thin buffer is refilled at most once a minute. */
     this.backfilled = new Map();
@@ -449,6 +456,9 @@ export class Bridge {
         this.state = state;
         this.semaphore = new Semaphore(config.limits.concurrency);
         this.log(`transport ${state}${detail === undefined ? '' : ` (${detail})`}`);
+        // Sending needs a live transport: a recovery attempted while the socket
+        // is still opening would fail and lose the turn a second time.
+        if (state === 'online') void this.#recoverPendingTurns();
       },
       onError: error => {
         this.counters.errors += 1;
@@ -1174,6 +1184,10 @@ export class Bridge {
 
     this.busy.add(message.scene);
     const startedAt = Date.now();
+    if (this.pendingTurns !== null) {
+      void this.pendingTurns.begin(message.scene, startedAt)
+        .catch(error => this.log(`pending-turn record failed: ${error?.message ?? error}`));
+    }
     let replyChars = 0;
     /** Token usage of the last assistant message, for the ledger. */
     let turnUsage = null;
@@ -1364,6 +1378,12 @@ export class Bridge {
           if (this.pendingContinue.delete(message.scene)) this.continuedSessions.add(sessionId);
           void this.#titleSession(sessionId, message);
         },
+        onPrompt: ({ sessionId, requestId }) => {
+          if (this.pendingTurns !== null) {
+            void this.pendingTurns.bind(message.scene, String(sessionId), String(requestId))
+              .catch(error => this.log(`pending-turn bind failed: ${error?.message ?? error}`));
+          }
+        },
       });
       turnUsage = result.usage ?? null;
       if (result.compacted === true) {
@@ -1450,6 +1470,13 @@ export class Bridge {
         fetchCalls: turnFetchCalls,
         ok: turnOk,
       });
+      // Reaching `finally` means this turn is over either way: a reply went out,
+      // or the failure path did. Only Dispose skips this, which is the case the
+      // leftover record exists for.
+      if (this.pendingTurns !== null) {
+        void this.pendingTurns.finish(message.scene)
+          .catch(error => this.log(`pending-turn clear failed: ${error?.message ?? error}`));
+      }
       release();
       this.#stopQuestionPoll(message.scene);
       if (this.store.get().output.sendTypingStatus) void this.setTyping(message, false);
@@ -1846,9 +1873,10 @@ export class Bridge {
    * @param {string} sessionId Session the turn ran in.
    * @param {string} scene Scene key (`dm:<qq>` or `group:<id>`).
    * @param {string} text Model text for that turn.
+   * @param {{ recovered?: boolean }} [options] `recovered` marks a repaired turn.
    * @returns {Promise<void>} Resolves after delivery.
    */
-  async #deliverForeign(sessionId, scene, text) {
+  async #deliverForeign(sessionId, scene, text, options = {}) {
     const body = String(text ?? '').trim();
     if (body === '' || this.client === undefined) return;
     const [kind, rawPeer] = String(scene).split(':');
@@ -1892,7 +1920,57 @@ export class Bridge {
     this.#noteDelivery(scene, [body]);
     this.lastReply.set(scene, body);
     this.counters.answered += 1;
-    this.log(`delivered a turn that did not come from QQ: ${scene} (${body.length} chars)`);
+    this.log(options.recovered === true
+      ? `recovered a reply lost to a plugin reload: ${scene} (${body.length} chars)`
+      : `delivered a turn that did not come from QQ: ${scene} (${body.length} chars)`);
+  }
+
+  /**
+   * Deliver replies a previous instance recorded but never confirmed.
+   *
+   * A reload between the Host's `turn/end` and the send disposes the instance and
+   * the answer vanishes without an error. The record survives, the turn is read
+   * back from the session by its request id, and a reply that did reach QQ in the
+   * meantime is recognized in the archive instead of being posted twice.
+   *
+   * @returns {Promise<void>} Resolves after every leftover record was handled.
+   */
+  async #recoverPendingTurns() {
+    if (this.pendingTurns === null || this.recoveryStarted === true) return;
+    this.recoveryStarted = true;
+    const rows = await this.pendingTurns.take().catch(error => {
+      this.log(`pending turns unreadable: ${error?.message ?? error}`);
+      return [];
+    });
+    for (const row of rows) {
+      if (row.sessionId === '' || row.requestId === '') {
+        this.log(`dropped a pending turn for ${row.scene}: it never reached a session`);
+        continue;
+      }
+      if (typeof this.driver?.recoverTurn !== 'function') continue;
+      const found = await this.driver.recoverTurn(row.sessionId, row.requestId).catch(() => null);
+      if (found === null) {
+        this.log(`could not recover the pending turn for ${row.scene} (request ${row.requestId})`);
+        continue;
+      }
+      if (this.#alreadyDelivered(row.scene, found.text)) {
+        this.log(`skipped a recovery for ${row.scene}: the same reply is already out`);
+        continue;
+      }
+      await this.#deliverForeign(row.sessionId, row.scene, found.text, { recovered: true });
+    }
+  }
+
+  /**
+   * Whether the archive already holds this exact outbound reply.
+   *
+   * @param {string} scene Scene key.
+   * @param {string} text Reply text.
+   * @returns {boolean} True when a matching outbound row exists.
+   */
+  #alreadyDelivered(scene, text) {
+    const rows = this.archive?.recent?.(scene, 10) ?? [];
+    return rows.some(row => row?.direction === 'out' && String(row?.text ?? '') === text);
   }
 
   #cardBlock(message, injection) {
