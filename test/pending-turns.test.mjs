@@ -35,14 +35,14 @@ test('take() hands the leftovers over once and clears the file', async () => {
   try {
     const file = join(dir, 'pending-turns.json');
     const first = new PendingTurns(file);
-    await first.begin('dm:1363309111', 1_700_000_000_000);
-    await first.bind('dm:1363309111', 'session-9', 'qq-lost');
+    await first.begin('dm:10000000', 1_700_000_000_000);
+    await first.bind('dm:10000000', 'session-9', 'qq-lost');
 
     // A reload: the next instance reads what the first one left behind.
     const second = new PendingTurns(file);
     const rows = await second.take();
     assert.deepEqual(rows, [{
-      scene: 'dm:1363309111',
+      scene: 'dm:10000000',
       sessionId: 'session-9',
       requestId: 'qq-lost',
       startedAt: 1_700_000_000_000,

@@ -104,7 +104,7 @@
 | 制药台 | | | | | | |
 | 防具台 | | | | | | |
 
-> 汇报以这张表为准，也是下一轮「上一批」的兜底。建议每轮结束追加到 `E:\DSH-to-QQ\logs\delta-orders.md`。
+> 汇报以这张表为准，也是下一轮「上一批」的兜底。建议每轮结束追加到 `logs/delta-orders.md`。
 
 ## 5. 单工位操作
 
@@ -176,7 +176,7 @@ $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
 $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen($b.X,$b.Y,0,0,$bmp.Size)
-$bmp.Save("E:\DSH-to-QQ\df-$(Get-Date -Format HHmmss).png", [System.Drawing.Imaging.ImageFormat]::Png)
+$bmp.Save("df-$(Get-Date -Format HHmmss).png", [System.Drawing.Imaging.ImageFormat]::Png)
 $g.Dispose(); $bmp.Dispose()
 ```
 
