@@ -24,7 +24,7 @@ import { looksLikeApproval } from '../policy/approvals.js';
 import { SceneBuffer, contextHeader, renderContext } from '../context/buffer.js';
 import { InjectionTracker, entrySignature } from '../context/injection.js';
 import { formatRecap } from '../context/recap.js';
-import { renderCard } from '../memory/store.js';
+import { renderCardParts } from '../memory/store.js';
 import { renderTextImageBase64 } from '../render/text-image.js';
 import { promptImageParts, persistImage, imageSegments, looksLikeSticker, downloadImage, detectMediaType } from '../media/inbound.js';
 import { describeQuestions, parseReply, extractPending } from './questions.js';
@@ -96,6 +96,22 @@ const QUOTA_REPLY = {
  * @returns {Promise<void>} Resolves after the delay.
  */
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Stable short key for one rendered card note, so a note can own its own
+ * injection slot instead of riding along with the whole card.
+ *
+ * @param {string} line Rendered note line.
+ * @returns {string} Base36 FNV-1a hash.
+ */
+function noteKey(line) {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < line.length; index += 1) {
+    hash ^= line.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
 
 /**
  * Classify a message's media, if any.
@@ -2196,9 +2212,24 @@ export class Bridge {
   #cardBlock(message, injection) {
     if (this.memory === undefined) return '';
     const card = this.memory.get(message.senderId);
+    const parts = renderCardParts({ card, name: message.senderName, qq: message.senderId });
+    if (parts === null) return '';
     // Keyed by sender: a group scene carries one card per speaker, and a shared
     // slot would re-send every card on every turn as speakers alternate.
-    return injection.fixed('card', renderCard({ card, name: message.senderName, qq: message.senderId }), message.senderId);
+    const key = message.senderId;
+    const blocks = [];
+    const head = injection.fixed('cardhead', [parts.head, parts.persona].filter(line => line !== '').join('\n'), key);
+    if (head !== '') blocks.push(head);
+    // Each note owns a slot keyed by its own text, so appending one note sends one
+    // line instead of the whole card.
+    const notes = parts.notes.map(line => injection.fixed(`cardnote:${noteKey(line)}`, line, key)).filter(line => line !== '');
+    if (notes.length > 0) {
+      const notesHead = injection.fixed('cardnotes', parts.notesHead, key);
+      blocks.push([notesHead !== '' ? notesHead : '（补充的印象）', ...notes].join('\n'));
+    }
+    const tail = injection.fixed('cardtail', parts.tail, key);
+    if (tail !== '') blocks.push(tail);
+    return blocks.join('\n');
   }
 
   /**
