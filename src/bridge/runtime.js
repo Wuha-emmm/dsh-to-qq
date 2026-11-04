@@ -342,6 +342,8 @@ export class Bridge {
     this.controller = options.controller;
     /** `ctx.userQuestions`, when the Host exposes it. */
     this.userQuestions = options.userQuestions;
+    /** Session id -> the live root agent, which is what the question service demands. */
+    this.resolveAgent = options.resolveAgent;
     /** Scene -> { sessionId, callId, questions } for an unanswered DSH question. */
     this.questions = new Map();
     /** Scene -> the inbound message that most recently woke us, for out-of-turn sends. */
@@ -1072,7 +1074,9 @@ export class Bridge {
     const parsed = parseReply(message.text, waiting.questions);
     if (parsed === undefined) return false;
     try {
-      const accepted = this.userQuestions.answer({ id: waiting.sessionId }, waiting.callId, parsed);
+      const agent = this.resolveAgent?.(waiting.sessionId);
+      if (agent === undefined) throw new Error(`no live agent for session ${waiting.sessionId}`);
+      const accepted = this.userQuestions.answer(agent, waiting.callId, parsed);
       this.questions.delete(message.scene);
       if (accepted !== true) {
         await this.sendText(message, '这个选择已经过期或已经被回答了。');

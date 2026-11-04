@@ -379,6 +379,16 @@ export function apply(ctx) {
     stateDir,
     controller: ctx.sessionController,
     userQuestions: ctx.get('userQuestions'),
+    // The question service accepts only the live root agent, never a bare
+    // session id; resolve it lazily so a recycled session cannot hold a stale
+    // agent object.
+    resolveAgent: (sessionId) => {
+      const agents = ctx.get('agents');
+      if (agents === undefined) return undefined;
+      const direct = agents.get?.(sessionId);
+      if (direct !== undefined) return direct;
+      return agents.roots?.().find?.(item => item.session === sessionId);
+    },
     speech: ctx.get('speechToText'),
     // Declared above this construction on purpose: a forward reference here is
     // a TDZ error at apply() time, which kills the whole plugin.
