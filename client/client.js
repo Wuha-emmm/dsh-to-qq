@@ -1880,6 +1880,255 @@ const StickerBoard = () => {
       }
     }
 
+    /** Main-area panel key; the sidebar entry reuses it so clicking the row switches panels. */
+    const PANEL_KEY = 'dsh-to-qq-chat';
+
+    /** Sidebar glyph for the QQ row. */
+    const QqPanelIcon = ({ size = 18 }) => h('svg', {
+      width: size,
+      height: size,
+      viewBox: '0 0 24 24',
+      fill: 'none',
+      stroke: 'currentColor',
+      strokeWidth: 1.7,
+      strokeLinecap: 'round',
+      strokeLinejoin: 'round',
+      'aria-hidden': 'true',
+    },
+    h('path', { d: 'M4 5.5h16v10.5H9.5L4 20z' }),
+    h('path', { d: 'M8 10h8M8 13.5h5' }));
+
+    /** Shared border colour so the two panes match the surrounding shell. */
+    const PANEL_BORDER = 'var(--dsw-alias-border-l1, rgba(127,127,127,.16))';
+
+    /**
+     * The QQ conversation as a main panel: conversations on the left, the chosen
+     * thread on the right, reasoning folded behind one click and translated on
+     * first open. Polls while visible so a reply arriving from DSH shows up
+     * without a reload.
+     *
+     * @returns {any} Element tree.
+     */
+    const QqPanel = () => {
+      const [state, setState] = React.useState(null);
+      const [error, setError] = React.useState('');
+      const [active, setActive] = React.useState(null);
+      const [messages, setMessages] = React.useState([]);
+      const [expanded, setExpanded] = React.useState(null);
+      const [translations, setTranslations] = React.useState({});
+      const [query, setQuery] = React.useState('');
+      const scrollRef = React.useRef(null);
+
+      React.useEffect(() => {
+        let cancelled = false;
+        const load = async () => {
+          try {
+            const data = await getJson('/dsh-to-qq/api/state');
+            if (cancelled) return;
+            setState(data);
+            setError('');
+          } catch (reason) {
+            if (!cancelled) setError(String(reason?.message ?? reason));
+          }
+        };
+        void load();
+        const timer = window.setInterval(() => void load(), 5000);
+        return () => {
+          cancelled = true;
+          window.clearInterval(timer);
+        };
+      }, []);
+
+      const scenes = React.useMemo(() => {
+        const rows = [...(state?.scenes ?? [])];
+        rows.sort((a, b) => String(b.lastAt ?? '').localeCompare(String(a.lastAt ?? '')));
+        return rows;
+      }, [state]);
+
+      // Newest conversation first: the panel opens on the last thing that happened.
+      React.useEffect(() => {
+        if (active === null && scenes.length > 0) setActive(scenes[0].scene);
+      }, [scenes, active]);
+
+      React.useEffect(() => {
+        if (active === null) {
+          setMessages([]);
+          return undefined;
+        }
+        let cancelled = false;
+        const load = async () => {
+          try {
+            const data = await getJson(`/dsh-to-qq/api/messages?scene=${encodeURIComponent(active)}&limit=80`);
+            if (!cancelled) setMessages(data.messages ?? []);
+          } catch (reason) {
+            if (!cancelled) setError(String(reason?.message ?? reason));
+          }
+        };
+        void load();
+        const timer = window.setInterval(() => void load(), 4000);
+        return () => {
+          cancelled = true;
+          window.clearInterval(timer);
+        };
+      }, [active]);
+
+      React.useEffect(() => {
+        const element = scrollRef.current;
+        if (element !== null) element.scrollTop = element.scrollHeight;
+      }, [messages, expanded]);
+
+      const toggleReasoning = (index) => {
+        const next = expanded === index ? null : index;
+        setExpanded(next);
+        if (next === null) return;
+        const entry = messages[index];
+        if (entry === undefined || typeof entry.reasoning !== 'string' || entry.reasoning === '') return;
+        if (translations[index] !== undefined) return;
+        setTranslations(current => ({ ...current, [index]: { status: 'loading' } }));
+        postJson('/dsh-to-qq/api/translate', { text: entry.reasoning })
+          .then(data => setTranslations(current => ({
+            ...current,
+            [index]: data.translated === false
+              ? { status: 'unavailable', text: String(data.text ?? ''), note: String(data.error ?? '') }
+              : { status: 'ok', text: String(data.text ?? '') },
+          })))
+          .catch(reason => setTranslations(current => ({ ...current, [index]: { status: 'error', text: String(reason?.message ?? reason) } })));
+      };
+
+      const needle = query.trim();
+      const shown = needle === '' ? scenes : scenes.filter(row => sceneLabel(row.scene).includes(needle));
+
+      const rowStyle = row => ({
+        textAlign: 'left',
+        border: 'none',
+        borderRadius: 8,
+        padding: '8px 10px',
+        cursor: 'pointer',
+        color: 'inherit',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 3,
+        fontSize: 12,
+        background: row.scene === active ? 'rgba(77,107,254,.16)' : 'transparent',
+      });
+
+      return h('div', {
+        style: {
+          display: 'flex',
+          height: '100%',
+          minHeight: 0,
+          overflow: 'hidden',
+          background: 'var(--dsw-alias-bg-base, #fff)',
+          color: 'var(--dsw-alias-label-primary, #1c1f24)',
+          fontSize: 13,
+        },
+      },
+      h('div', {
+        style: {
+          width: 260,
+          flex: '0 0 260px',
+          borderRight: `1px solid ${PANEL_BORDER}`,
+          display: 'flex',
+          flexDirection: 'column',
+          minHeight: 0,
+        },
+      },
+      h('div', {
+        style: { padding: '12px 12px 10px', borderBottom: `1px solid ${PANEL_BORDER}`, display: 'flex', flexDirection: 'column', gap: 8 },
+      },
+      h('div', { style: { fontWeight: 600 } }, 'QQ 对话'),
+      h('input', {
+        value: query,
+        onChange: event => setQuery(event.target.value),
+        placeholder: '搜索会话',
+        style: {
+          border: `1px solid ${PANEL_BORDER}`,
+          borderRadius: 8,
+          padding: '5px 8px',
+          fontSize: 12,
+          color: 'inherit',
+          background: 'transparent',
+          outline: 'none',
+        },
+      })),
+      h('div', { style: { overflowY: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 2, minHeight: 0 } },
+        shown.map(row => h('button', {
+          key: row.scene,
+          type: 'button',
+          onClick: () => setActive(row.scene),
+          style: rowStyle(row),
+        },
+        h('span', { style: { fontWeight: 600 } }, sceneLabel(row.scene)),
+        h('span', { style: { opacity: 0.55 } }, `${row.total} 条 · ${String(row.lastAt ?? '').slice(5, 16)}`))),
+        shown.length === 0
+          ? h('div', { style: { opacity: 0.55, padding: 8, fontSize: 12 } }, scenes.length === 0 ? '还没有消息记录。' : '没有匹配的会话。')
+          : null)),
+      h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 } },
+        h('div', {
+          style: {
+            padding: '12px 16px',
+            borderBottom: `1px solid ${PANEL_BORDER}`,
+            display: 'flex',
+            alignItems: 'baseline',
+            gap: 10,
+          },
+        },
+        h('span', { style: { fontWeight: 600 } }, active === null ? '—' : sceneLabel(active)),
+        h('span', { style: { fontSize: 11, opacity: 0.55 } },
+          state === null ? '读取状态…' : `连接 ${state.transport} · ${messages.length} 条`),
+        error === '' ? null : h('span', { style: { fontSize: 11, color: '#c0392b' } }, error)),
+        h('div', { style: { flex: 1, minHeight: 0, overflowY: 'auto', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8 }, ref: scrollRef },
+          messages.length === 0
+            ? h('div', { style: { opacity: 0.55 } }, '这个会话还没有记录。')
+            : messages.map((entry, index) => {
+              const hasReasoning = typeof entry.reasoning === 'string' && entry.reasoning !== '';
+              const isOpen = expanded === index;
+              const translation = translations[index];
+              return h('div', {
+                key: `${entry.msg_id}-${index}-${entry.time_bj}`,
+                onClick: hasReasoning ? () => toggleReasoning(index) : undefined,
+                style: {
+                  alignSelf: entry.direction === 'out' ? 'flex-end' : 'flex-start',
+                  maxWidth: '76%',
+                  background: entry.direction === 'out' ? 'rgba(77,107,254,.14)' : 'rgba(128,128,128,.14)',
+                  borderRadius: 10,
+                  padding: '7px 10px',
+                  cursor: hasReasoning ? 'pointer' : 'default',
+                },
+              },
+              h('div', { style: { fontSize: 11, opacity: 0.55, marginBottom: 2 } },
+                `${entry.direction === 'out' ? 'DSH' : entry.sender_name} · ${String(entry.time_bj).slice(11, 16)}`),
+              h('div', { style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, entry.text),
+              hasReasoning
+                ? h('div', { style: { fontSize: 11, opacity: 0.6, marginTop: 4 } }, isOpen ? '收起推理 ▲' : '查看推理 ▼')
+                : null,
+              isOpen
+                ? h('div', {
+                  style: {
+                    marginTop: 6,
+                    paddingTop: 6,
+                    fontSize: 11,
+                    opacity: 0.78,
+                    borderTop: '1px dashed rgba(128,128,128,.35)',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                  },
+                },
+                translation?.status === 'ok'
+                  ? translation.text
+                  : translation?.status === 'loading'
+                    ? '翻译中…'
+                    : entry.reasoning,
+                translation?.status === 'error'
+                  ? h('div', { style: { opacity: 0.6, marginTop: 4 } }, `（翻译失败：${translation.text}）`)
+                  : null,
+                translation?.status === 'unavailable'
+                  ? h('div', { style: { opacity: 0.55, marginTop: 4 } }, `（自动翻译不可用：${translation.note || '无可用翻译路由'}）`)
+                  : null)
+                : null);
+            }))));
+    };
+
     /** Slot entry for the settings surface. */
     const SettingsSection = () => h(SettingsBoundary, null, h(SettingsPage));
 
@@ -1896,11 +2145,19 @@ const StickerBoard = () => {
         return () => {};
       }, 'dsh-to-qq: keyframes');
 
-      ctx.slots.inject('shell.overlay', () => ctx.slots.register({
-        name: 'shell.overlay',
-        id: SLOT_ID,
+      // The conversation lives in the main area now; the floating panel is gone.
+      ctx.slots.inject('main', () => ctx.slots.register({
+        name: 'main',
+        key: PANEL_KEY,
         order: 40,
-      }, PetOverlay));
+      }, QqPanel));
+
+      ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
+        name: 'sidebar.panellist',
+        id: PANEL_KEY,
+        order: 12,
+        label: () => 'QQ 对话',
+      }, QqPanelIcon));
 
       ctx.slots.inject('settings.section', () => ctx.slots.register({
         name: 'settings.section',
