@@ -1576,7 +1576,7 @@ export class Bridge {
       }
       if (!asImage) {
         // A captioned picture rides along with this reply: one message, no repeat.
-        const merged = await this.#flushMedia(message, rawBody).catch(error => {
+        const merged = await this.#flushMedia(message, rawBody, result.reasoning).catch(error => {
           this.log(`media flush failed: ${error?.message ?? error}`);
           return false;
         });
@@ -1780,13 +1780,13 @@ export class Bridge {
       // The resumed turn can queue a file or a picture too. Flush it with the
       // text exactly like a normal turn: a path that forgets the queue leaves
       // the attachment behind, and the next answer posts it a second time.
-      const merged = await this.#flushMedia(message, body).catch(error => {
+      const merged = await this.#flushMedia(message, body, result?.reasoning).catch(error => {
         this.log(`media flush failed after approval: ${error?.message ?? error}`);
         return false;
       });
       if (body !== '' && !merged) {
         for (const chunk of chunkText(body, CHUNK_LIMIT)) await this.sendText(message, chunk, { record: false });
-        this.recordOutbound?.(message, body);
+        this.recordOutbound?.(message, body, undefined, result?.reasoning);
       }
       if (body !== '') {
         // Same guard as the normal path: a watcher that still reads this turn as
@@ -2634,7 +2634,7 @@ export class Bridge {
    * @param {string} reply Final assistant text (may be empty).
    * @returns {Promise<boolean>} True when something was sent.
    */
-  async #flushMedia(message, reply) {
+  async #flushMedia(message, reply, reasoning) {
     const queued = this.mediaQueue.get(message.scene) ?? [];
     if (queued.length === 0) return false;
     this.mediaQueue.delete(message.scene);
@@ -2676,7 +2676,7 @@ export class Bridge {
       const name = item.file.split(/[\\/]/).pop() ?? 'file';
       await client.call(upload, { ...params, file: item.file, name }, { timeoutMs: 60_000 });
     }
-    this.recordOutbound(message, text === '' ? '[图片]' : text, images.length > 0 ? 'image' : undefined, undefined, sentId);
+    this.recordOutbound(message, text === '' ? '[图片]' : text, images.length > 0 ? 'image' : undefined, reasoning, sentId);
     this.#noteDelivery(message.scene, [text]);
     for (const item of items) if (item.image !== '') await disposeUploadCopy(item.image);
     this.log(`media flushed with reply for ${message.scene} (${images.length} image(s), ${files.length} file(s))`);
