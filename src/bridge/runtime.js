@@ -344,6 +344,8 @@ export class Bridge {
     this.userQuestions = options.userQuestions;
     /** Scene -> { sessionId, callId, questions } for an unanswered DSH question. */
     this.questions = new Map();
+    /** Scene -> the inbound message that most recently woke us, for out-of-turn sends. */
+    this.lastInbound = new Map();
     /** Scene -> interval id while a turn polls for questions. */
     this.questionPolls = new Map();
     /** Last thing the question probe saw, surfaced by `qq_status`. */
@@ -699,6 +701,14 @@ export class Bridge {
     if (info === undefined || info.tier !== 'owner') return;
     this.questions.set(info.scene, { sessionId, callId: String(data.callId ?? ''), questions });
     this.log(`question pending in ${info.scene}: ${questions.length} question(s)`);
+    // The Host only draws the card in its own window; on QQ nobody can click, so
+    // read the question out loud or the person never learns it is waiting.
+    const last = this.lastInbound.get(info.scene);
+    if (last !== undefined) {
+      void this.sendText(last, describeQuestions(questions)).catch(error => {
+        this.log(`question announce failed: ${String(error?.message ?? error).slice(0, 120)}`);
+      });
+    }
   }
 
   /**
@@ -1072,8 +1082,14 @@ export class Bridge {
       await this.sendText(message, `已替你选：${summary || '（空）'}`);
       return true;
     } catch (error) {
-      await this.sendText(message, `这个选择送不进去：${String(error?.message ?? error).slice(0, 140)}`);
-      return true;
+      // The Host refuses answers that do not come from the exact live agent that
+      // asked, so this parked question can never be answered from QQ. Drop it
+      // instead of replaying the same error on every later message.
+      this.questions.delete(message.scene);
+      const why = String(error?.message ?? error).slice(0, 120);
+      this.log(`question answer failed in ${message.scene}: ${why}`);
+      await this.sendText(message, `这个选项 QQ 送不进去（${why}），这次提问我作废了，你直接把答案说成一句话就行。`);
+      return false;
     }
   }
 
@@ -1109,6 +1125,10 @@ export class Bridge {
 
     // A person who asks for no stickers should not have to argue with a model.
     this.#noteStickerPreference(message);
+
+    // Remember the last thing that woke us: a question raised outside the turn
+    // still needs a message object to be sent to, and this is the only one we keep.
+    this.lastInbound.set(message.scene, message);
 
     // Keep the display name next to the QQ number: the card is titled with it,
     // and the name only exists in the event payload.
