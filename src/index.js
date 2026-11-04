@@ -42,6 +42,7 @@ import { registerQqSendTool } from './tools/send.js';
 import { registerQqPathsTool } from './tools/paths.js';
 import { registerMemoryCardTool } from './tools/card.js';
 import { registerDigestTool } from './tools/digest.js';
+import { registerQqAskTool } from './tools/ask.js';
 import { openArchive } from './archive/db.js';
 import { PetClient } from './pet/client.js';
 import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
@@ -688,6 +689,9 @@ export function apply(ctx) {
 
   // A restored backup still names the old machine's drives; this fixes them.
   ctx.effect(() => registerQqPathsTool(ctx, { bridge, store, log }));
+
+  // Asking from QQ must not block the turn the way ask_user_question does.
+  ctx.effect(() => registerQqAskTool(ctx, { bridge, log }));
 
   // Panel data for the browser half: same origin, so the page's own session applies.
   /** @type {string} */
