@@ -1073,31 +1073,47 @@ export class Bridge {
   async #answerQuestion(message, waiting) {
     const parsed = parseReply(message.text, waiting.questions);
     if (parsed === undefined) return false;
-    try {
-      const agent = this.resolveAgent?.(waiting.sessionId);
-      if (agent === undefined) throw new Error(`no live agent for session ${waiting.sessionId}`);
-      const accepted = this.userQuestions.answer(agent, waiting.callId, parsed);
-      this.questions.delete(message.scene);
-      if (accepted !== true) {
-        await this.sendText(message, '这个选择已经过期或已经被回答了。');
-        return true;
-      }
-      const summary = parsed.answers
-        .map(item => item.custom ?? item.selected.join(' / '))
-        .filter(part => part !== '')
-        .join('；');
-      await this.sendText(message, `已替你选：${summary || '（空）'}`);
+    const summary = parsed.answers
+      .map(item => item.custom ?? item.selected.join(' / '))
+      .filter(part => part !== '')
+      .join('；');
+    const accepted = await this.#deliverAnswer(waiting, parsed);
+    this.questions.delete(message.scene);
+    if (accepted !== true) {
+      await this.sendText(message, '这个选择已经过期或已经被回答了。');
       return true;
-    } catch (error) {
-      // The Host refuses answers that do not come from the exact live agent that
-      // asked, so this parked question can never be answered from QQ. Drop it
-      // instead of replaying the same error on every later message.
-      this.questions.delete(message.scene);
-      const why = String(error?.message ?? error).slice(0, 120);
-      this.log(`question answer failed in ${message.scene}: ${why}`);
-      await this.sendText(message, `这个选项 QQ 送不进去（${why}），这次提问我作废了，你直接把答案说成一句话就行。`);
-      return false;
     }
+    await this.sendText(message, `已替你选：${summary || '（空）'}`);
+    return true;
+  }
+
+  /**
+   * Hand the parsed answer to the Host, retrying while the question is still
+   * open.
+   *
+   * The Host only accepts an answer once it has marked the question
+   * `continued`, which happens after the waiting tool call returns (timeout or
+   * reload). A person replying from QQ is usually faster than that, so the
+   * answer is held and retried instead of being dropped.
+   *
+   * @param {{ sessionId: string, callId: string, questions: any[] }} waiting The pending question.
+   * @param {any} parsed The parsed answer batch.
+   * @returns {Promise<boolean>} True when the Host accepted the answer.
+   */
+  async #deliverAnswer(waiting, parsed) {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      try {
+        const agent = this.resolveAgent?.(waiting.sessionId);
+        if (agent === undefined) throw new Error(`no live agent for session ${waiting.sessionId}`);
+        if (this.userQuestions.answer(agent, waiting.callId, parsed) === true) return true;
+      } catch (error) {
+        const why = String(error?.message ?? error).slice(0, 120);
+        this.log(`question answer failed in ${waiting.sessionId}: ${why}`);
+        if (why.includes('exact live calling agent')) return false;
+      }
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+    return false;
   }
 
   /**
