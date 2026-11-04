@@ -580,19 +580,12 @@ export function apply(ctx) {
 
     void (async () => {
       if (!(await pet.available())) {
-        log('dsh-pet is not running; menu and bubbles are disabled');
+        log('dsh-pet is not running; bubbles are disabled');
         return;
       }
-      const registered = await pet.registerMenu(['QQ 面板']);
-      log(`dsh-pet menu ${registered ? 'registered' : 'rejected'}`);
-      if (!registered) return;
-      petReady = true;
-      await pet.pollMenu(label => {
-        if (label === 'QQ 面板') {
-          menuClicks += 1;
-          log('panel requested from dsh-pet menu');
-        }
-      }, abort.signal);
+      // The conversation moved into a main panel, so the pet no longer offers a menu
+      // entry; only bubbles and work status remain on the pet side.
+      log('dsh-pet is running; bubbles and work status are on');
     })();
 
     return () => {
