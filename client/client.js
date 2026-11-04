@@ -1932,9 +1932,12 @@ const StickerBoard = () => {
       const [open, setOpen] = React.useState({});
       const [translations, setTranslations] = React.useState({});
       const [query, setQuery] = React.useState('');
-      const [stuck, setStuck] = React.useState(true);
+      const [pending, setPending] = React.useState(0);
       const scrollRef = React.useRef(null);
       const stickRef = React.useRef(true);
+      const jumpRef = React.useRef(false);
+      const lastKeyRef = React.useRef('');
+      const lastCountRef = React.useRef(0);
 
       React.useEffect(() => {
         let cancelled = false;
@@ -1971,8 +1974,11 @@ const StickerBoard = () => {
       React.useEffect(() => {
         setOpen({});
         setTranslations({});
+        setPending(0);
         stickRef.current = true;
-        setStuck(true);
+        jumpRef.current = true;
+        lastKeyRef.current = '';
+        lastCountRef.current = 0;
       }, [active]);
 
       React.useEffect(() => {
@@ -1986,6 +1992,15 @@ const StickerBoard = () => {
             const data = await getJson(`/dsh-to-qq/api/messages?scene=${encodeURIComponent(active)}&limit=80`);
             if (cancelled) return;
             const next = data.messages ?? [];
+            const newest = next.length === 0 ? undefined : next[next.length - 1];
+            const nextKey = newest === undefined ? '' : `${newest.msg_id}@${newest.time_bj}`;
+            const previousKey = lastKeyRef.current;
+            if (previousKey !== '' && nextKey !== '' && nextKey !== previousKey) {
+              const added = Math.max(1, next.length - lastCountRef.current);
+              setPending(count => count + added);
+            }
+            lastKeyRef.current = nextKey;
+            lastCountRef.current = next.length;
             // Same rows: keep the old array so React skips the whole re-render.
             setMessages(previous => (JSON.stringify(previous) === JSON.stringify(next) ? previous : next));
           } catch (reason) {
@@ -2000,11 +2015,13 @@ const StickerBoard = () => {
         };
       }, [active]);
 
-      // Only follow new messages when the reader is already at the bottom.
+      // Land at the bottom when the thread opens; a new message never jumps.
       React.useEffect(() => {
         const element = scrollRef.current;
-        if (element === null || !stickRef.current) return;
+        if (element === null || !jumpRef.current || messages.length === 0) return;
         element.scrollTop = element.scrollHeight;
+        stickRef.current = true;
+        jumpRef.current = false;
       }, [messages]);
 
       const onScroll = () => {
@@ -2012,14 +2029,14 @@ const StickerBoard = () => {
         if (element === null) return;
         const near = element.scrollHeight - element.scrollTop - element.clientHeight < 64;
         stickRef.current = near;
-        if (near !== stuck) setStuck(near);
+        if (near) setPending(count => (count === 0 ? count : 0));
       };
 
       const jumpToLatest = () => {
         const element = scrollRef.current;
         if (element === null) return;
         stickRef.current = true;
-        setStuck(true);
+        setPending(0);
         element.scrollTop = element.scrollHeight;
       };
 
@@ -2263,23 +2280,8 @@ const StickerBoard = () => {
           color: online ? '#0d8a5b' : '#c0392b',
         },
       }, state === null ? '读取中' : (online ? '已连接' : String(state.transport ?? '离线'))),
-      h('span', { style: { fontSize: 11, opacity: 0.45 } }, `${messages.length} 条`),
-      error === '' ? null : h('span', { style: { fontSize: 11, color: '#c0392b' } }, error),
-      stuck ? null : h('button', {
-        type: 'button',
-        onClick: jumpToLatest,
-        style: {
-          marginLeft: 'auto',
-          border: `1px solid ${PANEL_BORDER}`,
-          background: 'transparent',
-          color: 'inherit',
-          borderRadius: 20,
-          padding: '2px 10px',
-          fontSize: 11,
-          cursor: 'pointer',
-          opacity: 0.8,
-        },
-      }, '跳到最新 ↓'));
+      h('span', { style: { fontSize: 11, opacity: 0.45, marginLeft: 'auto' } }, `${messages.length} 条`),
+      error === '' ? null : h('span', { style: { fontSize: 11, color: '#c0392b' } }, error));
 
       const thread = h('div', {
         onScroll,
@@ -2299,7 +2301,29 @@ const StickerBoard = () => {
         ? h('div', { style: { margin: 'auto', opacity: 0.45, fontSize: 12 } }, '这个会话还没有记录')
         : bubbles);
 
-      const rightPane = h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 } }, header, thread);
+      const pill = pending === 0 ? null : h('button', {
+        type: 'button',
+        onClick: jumpToLatest,
+        style: {
+          position: 'absolute',
+          left: '50%',
+          bottom: 18,
+          transform: 'translateX(-50%)',
+          border: 'none',
+          borderRadius: 20,
+          padding: '6px 14px',
+          background: '#4d6bfe',
+          color: '#fff',
+          fontSize: 12,
+          cursor: 'pointer',
+          boxShadow: '0 6px 18px rgba(40,60,180,.35)',
+          zIndex: 2,
+        },
+      }, `新消息 ×${pending}`);
+
+      const threadWrap = h('div', { style: { position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } }, thread, pill);
+
+      const rightPane = h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 } }, header, threadWrap);
 
       return h('div', {
         style: {
