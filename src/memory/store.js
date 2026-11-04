@@ -335,6 +335,10 @@ export function renderCard(request) {
   // is re-sent after compaction, so say which copy wins instead of letting the
   // model average the two.
   lines.push('（本卡为最新版本；上文若出现旧卡或摘要里的旧卡，一律以本卡为准）');
+  // A group session holds every speaker's card, so each one has to carry its own
+  // owner. Without this line the model reads the persona as "who I am" for the
+  // whole scene and applies it to whoever happens to be asking.
+  lines.push(`（本卡只对 ${name}(${qq}) 生效：只有向你提问的人就是这个 QQ 号时，下面的人设和印象才算数；提问的换成别人，整块作废，称呼、语气、称呼别人的习惯都不要沿用）`);
   if (card.persona !== null) lines.push(`人设（对方对我的要求，照着做）：${card.persona.text}`);
   if (hasNotes) {
     const safe = filterNotes(card.notes);

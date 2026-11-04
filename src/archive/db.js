@@ -73,8 +73,15 @@ export async function openArchive(file) {
       media_path TEXT
     );
     CREATE INDEX IF NOT EXISTS messages_scene_time ON messages (scene, time_unix);
+    CREATE INDEX IF NOT EXISTS messages_scene_msg ON messages (scene, msg_id);
     CREATE INDEX IF NOT EXISTS messages_sender_time ON messages (sender_id, time_unix);
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS inject_ledger (
+      scene TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL DEFAULT '',
+      body TEXT NOT NULL,
+      at INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS turns (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       scene TEXT NOT NULL,
@@ -227,6 +234,160 @@ class Archive {
   }
 
   /**
+   * Read one scene's newest messages shaped like the in-memory context entries.
+   *
+   * The archive outlives the process, so this is the source the prompt is built
+   * from whenever it is available: a restart no longer loses the window, and
+   * the dedupe signature can use the real OneBot id instead of a timestamp.
+   *
+   * @param {string} scene Scene key.
+   * @param {number} [limit] Maximum rows.
+   * @returns {any[]} Entries oldest-first: senderId/senderName/text/time/messageId/direction.
+   */
+  recentEntries(scene, limit = 50) {
+    const rows = this.db.prepare(`
+      SELECT sender_id, sender_name, time_unix, text, direction, media_kind, msg_id
+      FROM messages
+      WHERE scene = ?
+      ORDER BY time_unix DESC, id DESC
+      LIMIT ?
+    `).all(scene, Math.min(200, Math.max(1, limit)));
+    return rows.reverse().map(row => ({
+      senderId: Number(row.sender_id) || 0,
+      // Our own lines are labelled 我 so the model can tell its words from the
+      // group's without counting turns.
+      senderName: (row.direction ?? 'in') === 'out' ? '我' : (row.sender_name ?? '对方'),
+      text: row.text ?? '',
+      time: Number(row.time_unix) || 0,
+      messageId: Number(row.msg_id) || 0,
+      direction: row.direction ?? 'in',
+      mediaKind: row.media_kind ?? undefined,
+      mentionsBot: false,
+    }));
+  }
+
+  /**
+   * Read a compact digest of everything older than the live window.
+   *
+   * The window alone makes the model blind past its edge: it answers "who
+   * asked first" from whatever survived. One line per message, truncated,
+   * capped, oldest first — cheap enough to send every turn.
+   *
+   * @param {string} scene Scene key.
+   * @param {number} beforeTime Unix seconds; only older rows are returned.
+   * @param {number} [limit] Maximum lines.
+   * @returns {{ time: number, name: string, text: string }[]} Digest lines oldest-first.
+   */
+  digestEntries(scene, beforeTime, limit = 80) {
+    const rows = this.db.prepare(`
+      SELECT sender_name, time_unix, text, direction
+      FROM messages
+      WHERE scene = ? AND time_unix < ?
+      ORDER BY time_unix DESC, id DESC
+      LIMIT ?
+    `).all(scene, Number(beforeTime) || Number.MAX_SAFE_INTEGER, Math.min(200, Math.max(1, limit)));
+    return rows.reverse().map(row => ({
+      time: Number(row.time_unix) || 0,
+      name: (row.direction ?? 'in') === 'out' ? '我' : (row.sender_name ?? '对方'),
+      text: (row.text ?? '').replace(/\s+/g, ' ').slice(0, 40),
+    }));
+  }
+
+  /**
+   * Count everything older than the live window, grouped by speaker.
+   *
+   * The digest only lists the newest lines; this is what lets the prompt say how
+   * much it is quietly leaving out, in one line instead of a thousand.
+   *
+   * @param {string} scene Scene key.
+   * @param {number} beforeTime Unix seconds; only older rows are counted.
+   * @returns {{ total: number, first: number, who: { name: string, count: number }[] }} Counts.
+   */
+  olderStats(scene, beforeTime) {
+    const rows = this.db.prepare(`
+      SELECT sender_name, direction, COUNT(*) AS n, MIN(time_unix) AS first
+      FROM messages
+      WHERE scene = ? AND time_unix < ?
+      GROUP BY direction, sender_name
+      ORDER BY n DESC
+    `).all(scene, Number(beforeTime) || Number.MAX_SAFE_INTEGER);
+    let total = 0;
+    let first = 0;
+    const who = [];
+    for (const row of rows) {
+      const count = Number(row.n) || 0;
+      total += count;
+      const stamp = Number(row.first) || 0;
+      if (stamp > 0 && (first === 0 || stamp < first)) first = stamp;
+      who.push({ name: (row.direction ?? 'in') === 'out' ? '我' : (row.sender_name ?? '对方'), count });
+    }
+    return { total, first, who: who.slice(0, 4) };
+  }
+
+  /**
+   * Read the persisted injection ledger of one scene.
+   *
+   * The ledger otherwise lives only in memory, so the first turn after a
+   * restart sees a full window again and re-sends it, paying twice for the
+   * same lines.
+   *
+   * @param {string} scene Scene key.
+   * @returns {{ sessionId: string, seen: string[], blocks: { slot: string, key: string, hash: string }[] } | undefined} Saved state.
+   */
+  ledgerLoad(scene) {
+    try {
+      const row = this.db.prepare('SELECT session_id, body FROM inject_ledger WHERE scene = ?').get(scene);
+      if (row === undefined || row === null) return undefined;
+      const body = JSON.parse(String(row.body ?? '{}'));
+      return {
+        sessionId: String(row.session_id ?? ''),
+        seen: Array.isArray(body.seen) ? body.seen.map(String) : [],
+        blocks: Array.isArray(body.blocks)
+          ? body.blocks.map(block => ({ slot: String(block.slot), key: String(block.key), hash: String(block.hash) }))
+          : [],
+      };
+    } catch (error) {
+      this.log?.(`ledger load failed: ${error?.message ?? error}`);
+      return undefined;
+    }
+  }
+
+  /**
+   * Persist one scene's injection ledger, replacing the previous copy.
+   *
+   * @param {string} scene Scene key.
+   * @param {{ sessionId: string, seen: string[], blocks: { slot: string, key: string, hash: string }[] }} state Ledger state.
+   * @returns {boolean} True when written.
+   */
+  ledgerSave(scene, state) {
+    try {
+      this.db.prepare(`
+        INSERT INTO inject_ledger (scene, session_id, body, at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(scene) DO UPDATE SET session_id = excluded.session_id, body = excluded.body, at = excluded.at
+      `).run(
+        scene,
+        String(state?.sessionId ?? ''),
+        JSON.stringify({ seen: state?.seen ?? [], blocks: state?.blocks ?? [] }),
+        Date.now(),
+      );
+      return true;
+    } catch (error) {
+      this.log?.(`ledger save failed: ${error?.message ?? error}`);
+      return false;
+    }
+  }
+
+  /** @param {string} scene Scene key. @returns {void} */
+  ledgerClear(scene) {
+    try {
+      this.db.prepare('DELETE FROM inject_ledger WHERE scene = ?').run(scene);
+    } catch {
+      // A missing row is the same as a cleared one.
+    }
+  }
+
+  /**
    * Record one answered turn for auditing.
    *
    * @param {{ scene: string, senderId: number, tier: string, startedAt: number, durationMs: number, promptChars: number, replyChars: number, ok: boolean }} turn Turn facts.
@@ -373,6 +534,28 @@ class Archive {
                  FROM messages ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
                  ORDER BY time_unix DESC LIMIT ?`;
     return this.db.prepare(sql).all(...params, limit);
+  }
+
+  /**
+   * Look one message up by its OneBot id inside a scene.
+   *
+   * Quotes of our own replies used to be unresolvable: the scene buffer only
+   * keeps what came in, and SnowLuma never echoes our own sends. The archive
+   * has both directions, so it can answer for the missing side.
+   *
+   * @param {string} scene Scene key such as `group:123`.
+   * @param {number} msgId OneBot message id.
+   * @returns {any|undefined} The row, newest first if duplicated.
+   */
+  byMessageId(scene, msgId) {
+    const id = Number(msgId);
+    if (!Number.isFinite(id) || id <= 0) return undefined;
+    return this.db.prepare(`
+      SELECT scene, sender_id, sender_name, time_unix, time_bj, text, msg_id, media_kind, media_path, direction
+      FROM messages
+      WHERE scene = ? AND msg_id = ?
+      ORDER BY id DESC LIMIT 1
+    `).get(scene, id);
   }
 
   /**

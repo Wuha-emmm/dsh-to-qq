@@ -18,6 +18,12 @@ export const HINTS = [
     text: context => `【回复长度】尽量控制在 ${context.lengthLimit} 字以内；内容较长时正常输出，我会自动转成图片发出去。`,
   },
   {
+    id: 'plain-text',
+    tiers: '*',
+    tools: [],
+    text: () => '【只发正文】回复直接写给人看的话，不要输出 XML、DSML、antml: 这类标签或工具调用残片；工具用接口调，不要把调用过程写进正文。',
+  },
+  {
     id: 'bilibili',
     tiers: '*',
     tools: ['bilibili_read'],

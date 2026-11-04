@@ -129,6 +129,8 @@ export function defaults() {
       replyDelayMs: 2000,
       jitterMs: 1500,
       maxDelayMs: 15000,
+      /** Hard ceiling on how long a reply is held while follow-ups collect. */
+      batchMaxWaitMs: 7000,
       /** refuse | silent | queue */
       overLimit: 'refuse',
     },
@@ -230,6 +232,7 @@ export const RANGES = {
   'limits.replyDelayMs': [0, 30000],
   'limits.jitterMs': [0, 10000],
   'limits.maxDelayMs': [0, 120000],
+  'limits.batchMaxWaitMs': [0, 120000],
   'output.imageThreshold': [100, 5000],
   'output.maxReplyChars': [0, 4000],
   'output.fontSize': [14, 48],

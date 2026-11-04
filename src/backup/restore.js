@@ -26,6 +26,7 @@ const TARGETS = [
   'guests.json',
   'quota.json',
   'accounts.json',
+  'rebuilds.json',
   'archive.db',
 ];
 
@@ -193,6 +194,9 @@ export async function restoreBackup(options) {
     }
     const opened = await openArchive(join(stateDir, 'archive.db'));
     if (bridge !== null && bridge !== undefined) bridge.archive = opened;
+    // The in-memory injection ledger describes a database that no longer
+    // exists: drop it before the next turn reads the restored rows.
+    await bridge?.afterRestore?.();
     bridge?.start?.();
     await rm(stash, { recursive: true, force: true }).catch(() => {});
     return { ok: true, ...summary, restored: present, backupBefore: before?.name ?? '' };

@@ -40,8 +40,8 @@ import { renderMemoryCard, renderDigestCard } from '../render/memory-card.js';
 import { summarizeDigest, formatDigest, dayRange, DIGEST_ROW_LIMIT } from '../digest/daily.js';
 import { dueForAutoNote, autoNotePrompt } from '../memory/autonote.js';
 import { summarizeImpressions, backfillImpressions } from './impression-run.js';
-import { shouldStaySilent } from './reply.js';
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { isEnvelopeDebris, shouldStaySilent } from './reply.js';
+import { appendFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -50,6 +50,13 @@ const SEEN_LIMIT = 800;
 
 /** Chunk size for one QQ text message. */
 const CHUNK_LIMIT = 1500;
+
+/**
+ * Sent once when a turn ends with envelope debris instead of prose. The answer
+ * the model meant to give was already formed in its reasoning, so a single
+ * nudge usually recovers it without the group ever seeing the tags.
+ */
+const DEBRIS_RETRY_NUDGE = '你上一条回复只输出了工具调用的标签碎片，没有正文。请直接用纯文本重发你要说的话，不要输出任何 XML 或标签。';
 
 /** How long a delivered body stays recognizable, so a second copy is dropped. */
 const RECENT_DELIVERY_MS = 15_000;
@@ -367,6 +374,26 @@ export class Bridge {
     this.seen = new Set();
     /** Scenes with a turn in flight, so one scene never interleaves two turns. */
     this.busy = new Set();
+    /**
+     * Scene -> messages waiting out the human-like pause before a turn starts.
+     *
+     * Rapid follow-ups join the same batch instead of being dropped as "busy";
+     * a batch whose scene is still answering stays parked until that turn ends.
+     *
+     * @type {Map<string, { messages: any[], firstAt: number, timer: any, ready: boolean, promise: Promise<any[]>, resolve: (value: any[]) => void }>}
+     */
+    this.batches = new Map();
+    /**
+     * Scenes whose transcript DSH just compressed.
+     *
+     * After a compaction the fixed anchors are re-sent, and the whole rolling
+     * window comes back with them. Replaying all 99 lines is a token spike for
+     * little gain: the summary already knows the gist, so only the newest lines
+     * are worth repeating. The value is how many lines to replay once.
+     *
+     * @type {Map<string, number>}
+     */
+    this.replayBudget = new Map();
     /** Turns on disk until delivery is confirmed, so a reload can repair them. */
     this.pendingTurns = typeof options.stateDir === 'string' && options.stateDir !== ''
       ? new PendingTurns(join(options.stateDir, 'pending-turns.json'))
@@ -1039,7 +1066,7 @@ export class Bridge {
       await this.#handleJoinRequest(joinRequest, config);
       return;
     }
-    const message = normalizeEvent(event);
+    let message = normalizeEvent(event);
     if (message === undefined) return;
     // Pin the bot account: an event claiming another self_id cannot be trusted,
     // because identity comes only from the event payload.
@@ -1197,8 +1224,11 @@ export class Bridge {
       return;
     }
 
-    const delay = config.limits.replyDelayMs + Math.round(Math.random() * config.limits.jitterMs);
-    await sleep(Math.min(delay, config.limits.maxDelayMs));
+    // Human-like pacing. Instead of a plain sleep that would drop anything sent
+    // meanwhile, hold the turn for a beat and let rapid follow-ups join it.
+    const batched = await this.#collectBatch(message, config);
+    if (batched === undefined) return;
+    message = batched;
 
     if (this.busy.has(message.scene)) {
       await this.sendText(message, '上一条还在处理，稍等一下。');
@@ -1268,7 +1298,7 @@ export class Bridge {
         if (seed !== '') this.pendingContinue.add(message.scene);
       }
       const promptBase = tier === 'owner'
-        ? this.#privatePrompt(message, config, card, quotedText)
+        ? this.#privatePrompt(message, config, card, quotedText, injection)
         : this.#groupPrompt(message, config, card, quotedText, injection);
       const stickers = imageSegments(message.segments).filter(looksLikeSticker).length;
       // Voice: QQ's own ASR first, then a local speech provider, then a command.
@@ -1428,6 +1458,10 @@ export class Bridge {
         // The summary swallowed the memory card, rules, sticker list and length
         // hint; forgetting the ledger makes the next message send them again.
         this.injections.delete(message.scene);
+        this.archive?.ledgerClear?.(message.scene);
+        // The transcript just lost its detail: replay the newest lines only, so
+        // the model gets its footing back without re-paying the whole window.
+        this.replayBudget.set(message.scene, 15);
         this.compactionStats = { count: (this.compactionStats?.count ?? 0) + 1, lastAt: Date.now() };
         this.log(`history compacted for ${message.scene}; anchors will be re-sent`);
       }
@@ -1435,7 +1469,21 @@ export class Bridge {
       turnFetchCalls = Number(result.fetchCalls) || 0;
       // A card is the answer: drop the "已发送" text that usually follows it.
       const cardSent = this.cardsSent > cardsBefore;
-      const rawBody = result.text.trim();
+      let rawBody = result.text.trim();
+      // The provider occasionally hands back the tail of the tool-call
+      // envelope as text: the model's answer never made it out, so sending
+      // this would post half a tag into the group. Ask once for the prose.
+      if (isEnvelopeDebris(rawBody)) {
+        const recovered = cardSent ? '' : await this.#retryDebris(message, config, tier, rawBody);
+        if (recovered === '') {
+          await this.#flushMedia(message, '').catch(error => this.log(`media flush failed: ${error?.message ?? error}`));
+          this.log(`suppressed envelope debris for ${message.scene} (${rawBody.length} chars)`);
+          turnOk = true;
+          void this.pet?.workStatus('success');
+          return;
+        }
+        rawBody = recovered;
+      }
       if (shouldStaySilent(result.text, { cardSent })) {
         await this.#flushMedia(message, '').catch(error => this.log(`media flush failed: ${error?.message ?? error}`));
         this.counters.answered += 1;
@@ -1519,8 +1567,80 @@ export class Bridge {
       this.#stopQuestionPoll(message.scene);
       if (this.store.get().output.sendTypingStatus) void this.setTyping(message, false);
       this.busy.delete(message.scene);
+      // Messages that arrived while this turn ran were parked, not dropped.
+      this.#fireBatch(message.scene);
       if (this.busy.size === 0) setTimeout(() => void this.pet?.workStatus('idle'), 4000)?.unref?.();
     }
+  }
+
+  /**
+   * Hold a turn for a human-like beat while follow-up messages collect.
+   *
+   * Every message joins its scene's batch. The batch fires once the scene has
+   * been quiet for `replyDelayMs` (+ jitter), and never later than
+   * `batchMaxWaitMs` after its first message, so a fast typist still gets an
+   * answer. A scene that is already answering does not lose the new messages:
+   * the batch parks and resolves when that turn finishes.
+   *
+   * Only the batch leader continues into the turn; the other callers return
+   * `undefined` and are represented by the merged text.
+   *
+   * @param {import('./events.js').QQMessage} message The message that arrived.
+   * @param {any} config Current bridge config.
+   * @returns {Promise<import('./events.js').QQMessage | undefined>}
+   */
+  async #collectBatch(message, config) {
+    const scene = message.scene;
+    let batch = this.batches.get(scene);
+    if (batch === undefined) {
+      /** @type {(value: any[]) => void} */
+      let resolve = () => {};
+      const promise = new Promise((settle) => { resolve = settle; });
+      batch = { messages: [], firstAt: Date.now(), timer: null, ready: false, promise, resolve };
+      this.batches.set(scene, batch);
+    }
+    batch.messages.push(message);
+
+    const limits = config.limits;
+    const gapMs = Math.min(
+      limits.replyDelayMs + Math.round(Math.random() * limits.jitterMs),
+      limits.maxDelayMs,
+    );
+    const capMs = Math.max(0, Number(limits.batchMaxWaitMs) || 0);
+    const leftMs = Math.max(0, capMs - (Date.now() - batch.firstAt));
+    if (batch.timer !== null) clearTimeout(batch.timer);
+    batch.timer = setTimeout(() => {
+      batch.timer = null;
+      batch.ready = true;
+      this.#fireBatch(scene);
+    }, Math.min(gapMs, leftMs));
+    batch.timer?.unref?.();
+
+    const messages = await batch.promise;
+    if (messages[0] !== message) return undefined;
+
+    const text = messages
+      .map(entry => entry.text)
+      .filter(entry => typeof entry === 'string' && entry !== '')
+      .join('\n');
+    const segments = messages.flatMap(entry => entry.segments ?? []);
+    return { ...message, text: text === '' ? message.text : text, segments };
+  }
+
+  /**
+   * Resolve a ready batch once its scene has no turn in flight.
+   *
+   * @param {string} scene The scene key.
+   */
+  #fireBatch(scene) {
+    const batch = this.batches.get(scene);
+    if (batch === undefined || !batch.ready || this.busy.has(scene)) return;
+    this.batches.delete(scene);
+    if (batch.timer !== null) {
+      clearTimeout(batch.timer);
+      batch.timer = null;
+    }
+    batch.resolve(batch.messages);
   }
 
   /**
@@ -1722,6 +1842,33 @@ export class Bridge {
   }
 
   /**
+   * Forget state that belonged to a database a restore just replaced.
+   *
+   * The injection ledger lives inside archive.db, so the restored file may
+   * carry a different ledger for the same scene; keeping the in-memory copy
+   * would silently skip blocks the restored backup never saw. Rebuild marks
+   * are read back from disk for the same reason.
+   *
+   * @returns {Promise<void>} Resolves once disk state was reloaded.
+   */
+  async afterRestore() {
+    const cleared = this.injections.size;
+    this.injections.clear();
+    this.replayBudget?.clear();
+    this.rebuildMarks.clear();
+    await this.#loadRebuildMarks();
+    this.log('restore: injection ledger and rebuild marks reloaded');
+    // A line on disk is the only proof that survives a restart: the panel shows
+    // the file, so a restore that silently skipped this hook is visible there.
+    if (this.stateDir !== '') {
+      const line = `${new Date().toISOString()} afterRestore cleared=${cleared} marks=${this.rebuildMarks.size}\n`;
+      await appendFile(join(this.stateDir, 'restore-marks.log'), line, 'utf8').catch(error => {
+        this.log(`restore marker failed: ${error?.message ?? error}`);
+      });
+    }
+  }
+
+  /**
    * Load rebuild marks that survived a restart.
    *
    * @returns {Promise<void>} Resolves after the read.
@@ -1891,8 +2038,17 @@ export class Bridge {
       this.injections.delete(scene);
     }
     if (existing !== undefined) return existing;
-    const fresh = new InjectionTracker();
+    const fresh = new InjectionTracker({
+      // Persist across restarts: the session keeps the injected history, so a
+      // new process must not treat the whole window as unseen.
+      store: { save: state => this.archive?.ledgerSave?.(scene, state) },
+    });
     fresh.sessionId = String(this.map?.get?.(scene) ?? '');
+    const saved = this.archive?.ledgerLoad?.(scene);
+    if (saved !== undefined && saved.sessionId === fresh.sessionId) {
+      fresh.hydrate(saved);
+      this.log(`injection ledger restored for ${scene} (${saved.seen.length} entries)`);
+    }
     // The binding may only appear after this turn creates the session; record it
     // lazily so the first turn's blocks are not re-sent next time.
     this.injections.set(scene, fresh);
@@ -2040,11 +2196,24 @@ export class Bridge {
    * @param {string} [card] Memory card block for the sender.
    * @returns {string} Prompt text.
    */
-  #privatePrompt(message, config, card = '', quotedText) {
+  #privatePrompt(message, config, card = '', quotedText, injection) {
     const text = message.text === '' ? '（发送了非文本消息）' : message.text;
     const body = text.slice(0, config.limits.maxInputChars);
     const quote = quotedText === undefined ? '' : `\n\n（他引用了这条消息）\n${quotedText}`;
-    return card === '' ? `${body}${quote}` : `${card}\n\n${body}${quote}`;
+    // A private chat used to arrive with no history at all, so every "刚才那个"
+    // had to be guessed. Same assembly as a group, just a shorter window.
+    const depth = 31;
+    const stored = this.archive?.recentEntries?.(message.scene, depth) ?? [];
+    const source = stored.length > 0
+      ? stored.filter(entry => String(entry.messageId) !== String(message.messageId))
+      : this.buffer.recent(message.scene, depth).slice(0, -1);
+    const entries = injection === undefined ? source : injection.delta(source);
+    const oldest = source.length > 0 ? Math.min(...source.map(entry => Number(entry.time) || 0)) : 0;
+    const earlier = oldest > 0 ? (this.archive?.digestEntries?.(message.scene, oldest, 30) ?? []) : [];
+    const earlierStats = oldest > 0 ? this.archive?.olderStats?.(message.scene, oldest) : undefined;
+    const context = renderContext({ entries, earlier, earlierStats, privateChat: true, maxChars: 4000 });
+    const parts = [card, context, body + quote].filter(part => part !== '');
+    return parts.join('\n\n');
   }
 
   /**
@@ -2063,6 +2232,16 @@ export class Bridge {
     const cached = this.buffer.find(message.scene, message.replyTo);
     const placeholder = cached !== undefined && /^\[(聊天记录|图片|文件|视频|语音)\]$/.test(cached.text.trim());
     if (cached !== undefined && !placeholder) return { text: `${cached.senderName}: ${cached.text}`, images: [] };
+    // The buffer never holds what we ourselves sent, so a quote of our own line
+    // used to fall through to get_msg; the archive still has both directions.
+    if (cached === undefined) {
+      const stored = this.archive?.byMessageId?.(message.scene, Number(message.replyTo));
+      const body = String(stored?.text ?? '').trim();
+      if (body !== '') {
+        const who = stored.direction === 'out' ? '我自己刚才说的' : String(stored.sender_name ?? '对方');
+        return { text: `${who}: ${body.slice(0, 1500)}`, images: [] };
+      }
+    }
     if (this.client === undefined) {
       return cached === undefined ? undefined : { text: `${cached.senderName}: ${cached.text}`, images: [] };
     }
@@ -2158,13 +2337,30 @@ export class Bridge {
    */
   #groupPrompt(message, config, card = '', quotedText, injection) {
     const window = Math.max(1, config.conversation.groupHistory);
-    // The session already holds what earlier turns injected, so only messages
-    // that appeared since then are worth sending again.
-    const entries = injection.delta(this.buffer.recent(message.scene, window + 1).slice(0, -1));
+    // After a compaction the ledger was dropped, so everything looks new. Cap
+    // that one replay: the summary already carries the gist of the older lines.
+    const budget = this.replayBudget.get(message.scene);
+    if (budget !== undefined) this.replayBudget.delete(message.scene);
+    const depth = budget === undefined ? window + 1 : Math.min(window + 1, budget + 1);
+    // The archive outlives the process: prefer it so a restart does not blank
+    // the window, and so the dedupe signature can use real message ids. The
+    // in-memory buffer stays as the fallback when archival is disabled.
+    const stored = this.archive?.recentEntries?.(message.scene, depth) ?? [];
+    const source = stored.length > 0
+      ? stored.filter(entry => String(entry.messageId) !== String(message.messageId))
+      : this.buffer.recent(message.scene, depth).slice(0, -1);
+    const entries = injection.delta(source);
+    // Past the edge of the window the model used to be blind, so it invented
+    // who had asked what. A truncated one-liner digest keeps the thread cheap.
+    const oldest = source.length > 0 ? Math.min(...source.map(entry => Number(entry.time) || 0)) : 0;
+    const earlier = oldest > 0 ? (this.archive?.digestEntries?.(message.scene, oldest) ?? []) : [];
+    const earlierStats = oldest > 0 ? this.archive?.olderStats?.(message.scene, oldest) : undefined;
     const cached = message.replyTo === undefined ? undefined : this.buffer.find(message.scene, message.replyTo);
     const quoted = quotedText ?? (cached === undefined ? undefined : `${cached.senderName}: ${cached.text}`);
     const block = renderContext({
       entries,
+      earlier,
+      earlierStats,
       quoted,
       maxChars: config.conversation.groupCharCap,
     });
@@ -2173,8 +2369,13 @@ export class Bridge {
     const privacy = config.conversation.groupPrivacy === false
       ? ''
       : injection.fixed('rules', '【群聊规则】上下文里其他成员的消息只用于理解你们在聊什么，不要复述、总结、转述或引用其中任何一句；被问到“别人说了什么”时，只回答你自己看到的本轮内容。回复里直接写 @名字 就会真的 @ 到对方（桥会把它转成真正的 @ 段），不要只写名字。记忆卡按人区分：卡头写着名字和 QQ 号，只对卡上那个人生效，不要把它的人设或印象套到别人身上；你此刻在对话的是【当前提问】里那个名字和 QQ 号，其余卡只当背景。');
+    const scope = injection.fixed(
+      'scope',
+      `【作用域】这次向你提问的是 ${message.senderName}(${message.senderId})。上下文里出现过的记忆卡只属于卡头写的那个人，只照【当前提问】这个人说话；别人的称呼习惯、人设、印象一律不要往对方身上套。`,
+      message.senderId,
+    );
     const ask = `【当前提问】${message.senderName}(${message.senderId}): ${message.text === '' ? '（非文本消息）' : message.text}`;
-    const parts = [card, block, privacy, ask].filter(part => part !== '');
+    const parts = [card, block, privacy, scope, ask].filter(part => part !== '');
     return parts.join('\n\n');
   }
 
@@ -2266,6 +2467,43 @@ export class Bridge {
   }
 
   /**
+   * Ask the same turn once more after envelope debris came back.
+   *
+   * The model's reasoning already holds the answer; one nudge is normally
+   * enough to get it out as prose. A second failure is answered with silence
+   * rather than with another attempt, so a broken turn cannot loop.
+   *
+   * @param {import('./events.js').QQMessage} message Triggering message.
+   * @param {Record<string, any>} config Runtime configuration.
+   * @param {string} tier Tier of the turn.
+   * @param {string} debris The text that was rejected.
+   * @returns {Promise<string>} Recovered prose, or '' when the retry failed.
+   */
+  async #retryDebris(message, config, tier, debris) {
+    this.log(`envelope debris for ${message.scene} (${debris.length} chars: ${debris.slice(0, 40)}), retrying once`);
+    try {
+      const retry = await this.driver.ask({
+        scene: message.scene,
+        text: DEBRIS_RETRY_NUDGE,
+        content: [{ type: 'text', text: DEBRIS_RETRY_NUDGE }],
+        cwd: config.conversation.cwd,
+        timeoutMs: config.limits.turnTimeoutMs,
+        tier,
+      });
+      const text = String(retry?.text ?? '').trim();
+      if (text !== '' && !isEnvelopeDebris(text)) {
+        this.log(`envelope debris recovered for ${message.scene} (${text.length} chars)`);
+        return text;
+      }
+      this.log(`envelope debris retry returned no prose for ${message.scene}`);
+      return '';
+    } catch (error) {
+      this.log(`envelope debris retry failed for ${message.scene}: ${error?.message ?? error}`);
+      return '';
+    }
+  }
+
+  /**
    * Send the queued media together with the turn's text.
    *
    * @param {import('./events.js').QQMessage} message Triggering message.
@@ -2339,8 +2577,18 @@ export class Bridge {
       ? { user_id: message.peerId, message: segments }
       : { group_id: message.groupId, message: segments };
     try {
-      await this.client.call(action, params, { timeoutMs: 10_000 });
-      if (options.record !== false) this.recordOutbound(message, text);
+      const sent = await this.client.call(action, params, { timeoutMs: 10_000 });
+      // SnowLuma does not echo our own sends back over the socket, so this id is
+      // the only handle we get on the message we just posted: keep it.
+      // OneBot.call already unwraps the envelope, so the id sits on the object
+      // itself; the nested form is kept for stacks that answer differently.
+      const sentId = Number(sent?.message_id ?? sent?.data?.message_id ?? 0) || 0;
+      // Chunked replies record once at the end, so stash every id we got here.
+      if (sentId !== 0) {
+        message.sentIds = message.sentIds ?? [];
+        message.sentIds.push(sentId);
+      }
+      if (options.record !== false) this.recordOutbound(message, text, undefined, undefined, sentId);
     } catch (error) {
       this.counters.errors += 1;
       this.log(`reply failed: ${error.message}`);
@@ -2355,8 +2603,9 @@ export class Bridge {
    * @param {string} text What we sent.
    * @param {string} [mediaKind] Set when the body was an image.
    * @param {string} [reasoning] The model's reasoning for this reply.
+   * @param {number} [messageId] OneBot id of the message we posted.
    */
-  recordOutbound(message, text, mediaKind, reasoning) {
+  recordOutbound(message, text, mediaKind, reasoning, messageId) {
     if (this.archive === null || this.archive === undefined) return;
     this.outSeq = (this.outSeq ?? 0) + 1;
     this.archive.insert({
@@ -2370,7 +2619,7 @@ export class Bridge {
       senderName: 'DSH',
       time: Math.floor(Date.now() / 1000),
       text,
-      messageId: 0,
+      messageId: Number(messageId) || Number(message.sentIds?.[0]) || 0,
       direction: 'out',
       mediaKind,
       reasoning,

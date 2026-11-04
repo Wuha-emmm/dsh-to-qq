@@ -49,8 +49,12 @@ import { rawSendRefusal } from './policy/raw-send.js';
 /** Required services: tools, the session driver, and the HTTP carrier for the panel. */
 export const inject = ['tools', 'sessionController', 'webServer'];
 
-/** Reported by `qq_status` and by the panel endpoint, so a stale host is visible. */
-const VERSION = '0.86.9';
+/**
+ * Reported by `qq_status` and by the panel endpoint, so a stale host is visible.
+ * Keep this in step with package.json — it is what tells a running instance
+ * apart from the build that was just installed.
+ */
+const VERSION = '0.87.1';
 
 /** Largest backup a browser upload may carry. */
 const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;

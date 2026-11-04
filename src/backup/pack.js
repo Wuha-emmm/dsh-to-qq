@@ -28,6 +28,7 @@ const STATE_FILES = [
   'guests.json',
   'quota.json',
   'accounts.json',
+  'rebuilds.json',
 ];
 
 /** Per-file ceiling for optional media entries. */

@@ -28,16 +28,24 @@ export function textHash(text) {
 
 /** Signature of one buffered message, used to detect what was already sent. */
 export function entrySignature(entry) {
+  // QQ gives every message an id, and it is unique even when the same person
+  // sends the same text twice in the same second. Only fall back to the content
+  // signature when no id survived (backfill or a synthetic entry).
+  const id = entry?.messageId;
+  if (id !== undefined && id !== null && Number(id) !== 0) return `id:${id}`;
   return `${entry?.time ?? 0}|${entry?.senderId ?? 0}|${entry?.text ?? ''}`;
 }
 
 /** Tracks which fixed context blocks a session already received. */
 export class InjectionTracker {
   /**
-   * @param {{ seenLimit?: number }} [options] Wiring.
+   * @param {{ seenLimit?: number, store?: { save: (state: object) => void } }} [options] Wiring.
    */
   constructor(options = {}) {
     this.seenLimit = Math.max(50, Number(options.seenLimit) || 400);
+    // Persisting the ledger across restarts is what keeps the first turn of a
+    // new process from re-sending a window the session already has.
+    this.store = options.store;
     /**
      * Card hashes, one per sender.
      *
@@ -49,6 +57,17 @@ export class InjectionTracker {
      * @type {Map<string | number, string>}
      */
     this.cardHash = new Map();
+    /**
+     * Scope notes, one per speaker.
+     *
+     * Everyone in a group shares one session, so the transcript ends up holding
+     * other people's cards. A note naming the current asker goes out the first time
+     * that person speaks, and again only when its text changes — one line per
+     * speaker, never one line per turn.
+     *
+     * @type {Map<string | number, string>}
+     */
+    this.scopeHash = new Map();
     this.stickerHash = '';
     this.rulesHash = '';
     /** @type {Set<string>} Message signatures already inside the session. */
@@ -83,6 +102,7 @@ export class InjectionTracker {
       }
       store.set(key, hash);
       this.injected += text.length;
+      this.#persist();
       return text;
     }
     if (store === hash) {
@@ -91,6 +111,7 @@ export class InjectionTracker {
     }
     this[`${slot}Hash`] = hash;
     this.injected += text.length;
+    this.#persist();
     return text;
   }
 
@@ -103,9 +124,63 @@ export class InjectionTracker {
   delta(entries) {
     const list = Array.isArray(entries) ? entries : [];
     const fresh = list.filter(entry => !this.seen.has(entrySignature(entry)));
-    for (const entry of list) this.seen.add(entrySignature(entry));
-    this.#trimSeen();
+    if (fresh.length > 0) {
+      for (const entry of list) this.seen.add(entrySignature(entry));
+      this.#trimSeen();
+      this.#persist();
+    }
     return fresh;
+  }
+
+  /**
+   * Restore a ledger saved by an earlier process.
+   *
+   * Only useful when the session binding is the same one: a new session has
+   * seen nothing, so its blocks must go out again.
+   *
+   * @param {{ seen?: string[], blocks?: { slot: string, key: string, hash: string }[] }} state Saved state.
+   * @returns {void}
+   */
+  hydrate(state) {
+    for (const signature of state?.seen ?? []) this.seen.add(String(signature));
+    for (const block of state?.blocks ?? []) {
+      const store = this[`${block.slot}Hash`];
+      if (store instanceof Map) store.set(block.key, block.hash);
+      else if (String(block.key ?? '') === '') this[`${block.slot}Hash`] = block.hash;
+    }
+    this.#trimSeen();
+  }
+
+  /**
+   * Snapshot the ledger for persistence.
+   *
+   * @param {string} [sessionId] Session the ledger belongs to.
+   * @returns {{ sessionId: string, seen: string[], blocks: { slot: string, key: string, hash: string }[] }} Snapshot.
+   */
+  snapshot(sessionId = this.sessionId) {
+    /** @type {{ slot: string, key: string, hash: string }[]} */
+    const blocks = [];
+    for (const slot of ['card', 'scope']) {
+      const store = this[`${slot}Hash`];
+      if (store instanceof Map) {
+        for (const [key, hash] of store) blocks.push({ slot, key: String(key), hash });
+      }
+    }
+    for (const slot of ['rules', 'stickers', 'length']) {
+      const hash = this[`${slot}Hash`];
+      if (typeof hash === 'string' && hash !== '') blocks.push({ slot, key: '', hash });
+    }
+    return { sessionId: String(sessionId ?? ''), seen: [...this.seen], blocks };
+  }
+
+  /** Write the ledger through to the store, when one is wired. */
+  #persist() {
+    if (typeof this.store?.save !== 'function') return;
+    try {
+      this.store.save(this.snapshot());
+    } catch {
+      // Persistence is an optimisation: never fail a turn over it.
+    }
   }
 
   /** Drop the oldest signatures so a long session cannot grow without bound. */
