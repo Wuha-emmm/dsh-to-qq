@@ -705,7 +705,10 @@ export class Bridge {
     // read the question out loud or the person never learns it is waiting.
     const last = this.lastInbound.get(info.scene);
     if (last !== undefined) {
-      void this.sendText(last, describeQuestions(questions)).catch(error => {
+      // Answering from QQ is impossible: the Host only accepts an answer from the
+      // live agent instance, so say plainly that the click has to happen in the window.
+      const notice = `${describeQuestions(questions)}\n\n（这个在 QQ 里点不了，得去窗口点一下；我这边整个回合都卡在这，点完才继续。）`;
+      void this.sendText(last, notice).catch(error => {
         this.log(`question announce failed: ${String(error?.message ?? error).slice(0, 120)}`);
       });
     }
