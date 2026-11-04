@@ -39,6 +39,7 @@ import { GuestRegistry, installTierRestriction } from './policy/restrictions.js'
 import { MemoryStore } from './memory/store.js';
 import { registerMemoryTools } from './tools/memory.js';
 import { registerQqSendTool } from './tools/send.js';
+import { registerQqPathsTool } from './tools/paths.js';
 import { registerMemoryCardTool } from './tools/card.js';
 import { registerDigestTool } from './tools/digest.js';
 import { openArchive } from './archive/db.js';
@@ -674,6 +675,9 @@ export function apply(ctx) {
 
   // Same for "今天群里聊了啥".
   ctx.effect(() => registerDigestTool(ctx, { bridge, log }));
+
+  // A restored backup still names the old machine's drives; this fixes them.
+  ctx.effect(() => registerQqPathsTool(ctx, { bridge, store, log }));
 
   // Panel data for the browser half: same origin, so the page's own session applies.
   /** @type {string} */
