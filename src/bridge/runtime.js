@@ -2510,7 +2510,8 @@ export class Bridge {
    * @returns {Promise<boolean>} True when the picture was delivered.
    */
   async sendLongReply(message, body, config, reasoning) {
-    if (this.client === undefined) return false;
+    const client = await this.#transport();
+    if (client === undefined) return false;
     try {
       const payload = await renderTextImageBase64({
         text: body,
@@ -2523,8 +2524,9 @@ export class Bridge {
       const params = message.kind === 'dm'
         ? { user_id: message.peerId, message: [{ type: 'image', data: { file: payload } }] }
         : { group_id: message.groupId, message: [{ type: 'image', data: { file: payload } }] };
-      await this.client.call(action, params, { timeoutMs: 30_000 });
-      this.recordOutbound(message, `[图片] 长回复 ${body.length} 字`, 'image', reasoning);
+      const sent = await client.call(action, params, { timeoutMs: 30_000 });
+      const sentId = Number(sent?.message_id ?? sent?.data?.message_id ?? 0) || 0;
+      this.recordOutbound(message, `[图片] 长回复 ${body.length} 字`, 'image', reasoning, sentId);
       // The picture is the reply: a text copy of it is a duplicate, not a second answer.
       this.#noteDelivery(message.scene, [body]);
       return true;
@@ -2652,14 +2654,19 @@ export class Bridge {
     }
     const isGroup = message.kind === 'group';
     const params = isGroup ? { group_id: message.groupId } : { user_id: message.peerId };
+    const client = await this.#transport();
+    if (client === undefined) {
+      this.log(`transport down; dropped queued media for ${message.scene}`);
+      return false;
+    }
     let sentId = 0;
     if (segments.length > 0) {
-      const sent = await this.client.call(isGroup ? 'send_group_msg' : 'send_private_msg', { ...params, message: segments }, { timeoutMs: 30_000 });
+      const sent = await client.call(isGroup ? 'send_group_msg' : 'send_private_msg', { ...params, message: segments }, { timeoutMs: 30_000 });
       sentId = Number(sent?.message_id ?? sent?.data?.message_id ?? 0) || 0;
     }
     // Extra pictures and files follow as their own messages.
     for (const item of images.slice(4)) {
-      await this.client.call(isGroup ? 'send_group_msg' : 'send_private_msg', {
+      await client.call(isGroup ? 'send_group_msg' : 'send_private_msg', {
         ...params,
         message: [{ type: 'image', data: { file: toImageSource(item.image) } }],
       }, { timeoutMs: 30_000 });
@@ -2667,7 +2674,7 @@ export class Bridge {
     for (const item of files) {
       const upload = isGroup ? 'upload_group_file' : 'upload_private_file';
       const name = item.file.split(/[\\/]/).pop() ?? 'file';
-      await this.client.call(upload, { ...params, file: item.file, name }, { timeoutMs: 60_000 });
+      await client.call(upload, { ...params, file: item.file, name }, { timeoutMs: 60_000 });
     }
     this.recordOutbound(message, text === '' ? '[图片]' : text, images.length > 0 ? 'image' : undefined, undefined, sentId);
     this.#noteDelivery(message.scene, [text]);
@@ -2691,8 +2698,30 @@ export class Bridge {
     await this.sendText(message, text);
   }
 
+  /**
+   * Wait for the transport to come back before giving up on a send.
+   *
+   * OneBot reconnects on its own, and a reply written during the gap is worth
+   * holding for a few seconds instead of dropping it on the floor.
+   *
+   * @param {number} [timeoutMs] How long to keep waiting.
+   * @returns {Promise<any>} The client, or undefined when it never came back.
+   */
+  async #transport(timeoutMs = 20_000) {
+    const started = Date.now();
+    while (this.client === undefined) {
+      if (Date.now() - started >= timeoutMs) return undefined;
+      await sleep(Math.min(500, timeoutMs - (Date.now() - started)));
+    }
+    return this.client;
+  }
+
   async sendText(message, text, options = {}) {
-    if (this.client === undefined) return;
+    const client = await this.#transport();
+    if (client === undefined) {
+      this.log(`transport still down after waiting; dropped a reply for ${message.scene}`);
+      return;
+    }
     const action = message.kind === 'dm' ? 'send_private_msg' : 'send_group_msg';
     const segments = message.kind === 'dm'
       ? [{ type: 'text', data: { text } }]
@@ -2701,7 +2730,7 @@ export class Bridge {
       ? { user_id: message.peerId, message: segments }
       : { group_id: message.groupId, message: segments };
     try {
-      const sent = await this.client.call(action, params, { timeoutMs: 10_000 });
+      const sent = await client.call(action, params, { timeoutMs: 10_000 });
       // SnowLuma does not echo our own sends back over the socket, so this id is
       // the only handle we get on the message we just posted: keep it.
       // OneBot.call already unwraps the envelope, so the id sits on the object
