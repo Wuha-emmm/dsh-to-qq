@@ -2652,8 +2652,10 @@ export class Bridge {
     }
     const isGroup = message.kind === 'group';
     const params = isGroup ? { group_id: message.groupId } : { user_id: message.peerId };
+    let sentId = 0;
     if (segments.length > 0) {
-      await this.client.call(isGroup ? 'send_group_msg' : 'send_private_msg', { ...params, message: segments }, { timeoutMs: 30_000 });
+      const sent = await this.client.call(isGroup ? 'send_group_msg' : 'send_private_msg', { ...params, message: segments }, { timeoutMs: 30_000 });
+      sentId = Number(sent?.message_id ?? sent?.data?.message_id ?? 0) || 0;
     }
     // Extra pictures and files follow as their own messages.
     for (const item of images.slice(4)) {
@@ -2667,7 +2669,7 @@ export class Bridge {
       const name = item.file.split(/[\\/]/).pop() ?? 'file';
       await this.client.call(upload, { ...params, file: item.file, name }, { timeoutMs: 60_000 });
     }
-    this.recordOutbound(message, text === '' ? '[图片]' : text, images.length > 0 ? 'image' : undefined);
+    this.recordOutbound(message, text === '' ? '[图片]' : text, images.length > 0 ? 'image' : undefined, undefined, sentId);
     this.#noteDelivery(message.scene, [text]);
     for (const item of items) if (item.image !== '') await disposeUploadCopy(item.image);
     this.log(`media flushed with reply for ${message.scene} (${images.length} image(s), ${files.length} file(s))`);
@@ -2710,7 +2712,11 @@ export class Bridge {
         message.sentIds = message.sentIds ?? [];
         message.sentIds.push(sentId);
       }
-      if (options.record !== false) this.recordOutbound(message, text, undefined, undefined, sentId);
+      if (options.record !== false) {
+        this.recordOutbound(message, text, undefined, undefined, sentId);
+        // Each stored message owns its id; a later record must not inherit this one.
+        message.sentIds = [];
+      }
     } catch (error) {
       this.counters.errors += 1;
       this.log(`reply failed: ${error.message}`);
@@ -2741,7 +2747,7 @@ export class Bridge {
       senderName: 'DSH',
       time: Math.floor(Date.now() / 1000),
       text,
-      messageId: Number(messageId) || Number(message.sentIds?.[0]) || 0,
+      messageId: Number(messageId) || Number(message.sentIds?.[message.sentIds.length - 1]) || 0,
       direction: 'out',
       mediaKind,
       reasoning,
