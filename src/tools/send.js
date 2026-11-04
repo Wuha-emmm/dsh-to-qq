@@ -40,7 +40,7 @@ export function registerQqSendTool(ctx, options) {
   return ctx.tools.register({
     name: 'qq_send',
     description:
-      'Send something into the current QQ conversation: text, an image, or a file. Use it when the user asks you to send/receive a file or a screenshot. With an image, the text is a caption: a short one reads as a label, and a long one is merged into this turn\'s reply (nothing is truncated, and a caption already inside the reply is not repeated). Local images/files are administrator only.',
+      'Send something into the current QQ conversation: text, an image, or a file. Use it when the user asks you to send/receive a file or a screenshot. Text without an attachment is never sent on its own — it is merged into this turn\'s reply, so calling it cannot produce a second copy of what you are already about to say. With an image, the text is a caption: a short one reads as a label, and a long one is merged into this turn\'s reply (nothing is truncated, and a caption already inside the reply is not repeated). Local images/files are administrator only.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -86,8 +86,21 @@ export function registerQqSendTool(ctx, options) {
       }
 
       const caption = captionOf(args.text);
+      // Text on its own is not a separate message: the turn's reply already goes
+      // out, so sending it now would double every sentence the model repeats.
+      // Queue it instead; the flush merges it with the reply and drops repeats.
+      if (!wantsImage && !wantsFile) {
+        if (caption.text === '') throw new Error('nothing to send: pass text, image, or file');
+        bridge.queueMedia(context.scene, { caption: caption.text, image: '', file: '' });
+        options.log(`qq_send queued text ${context.scene} (${caption.text.length} chars)`);
+        return {
+          report: '已并入本轮回复一起发出（同一条消息，不会重复）',
+          scene: context.scene,
+          queued: true,
+        };
+      }
       // A captioned picture is part of the answer: hold it for the reply.
-      if ((wantsImage || wantsFile) && caption.text !== '') {
+      if (caption.text !== '') {
         bridge.queueMedia(context.scene, {
           caption: caption.text,
           image: imagePath,
