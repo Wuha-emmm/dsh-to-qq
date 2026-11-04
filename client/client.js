@@ -1909,15 +1909,32 @@ const StickerBoard = () => {
      *
      * @returns {any} Element tree.
      */
+    /** Monospace stack for reasoning blocks: they read as logs, not prose. */
+    const PANEL_MONO = 'ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, monospace';
+
+    /** Group conversations and private chats get different accent colours. */
+    const sceneAccent = scene => (String(scene).startsWith('group:') ? '#4d6bfe' : '#12a06a');
+
+    /**
+     * The QQ conversation as a main panel: conversations on the left, the chosen
+     * thread on the right. Reasoning folds open per message and stays open while
+     * you open another one; the list does not re-render when a poll returns the
+     * same rows, and it only follows the newest message while you are parked at
+     * the bottom, so opening a long block no longer throws the view around.
+     *
+     * @returns {any} Element tree.
+     */
     const QqPanel = () => {
       const [state, setState] = React.useState(null);
       const [error, setError] = React.useState('');
       const [active, setActive] = React.useState(null);
       const [messages, setMessages] = React.useState([]);
-      const [expanded, setExpanded] = React.useState(null);
+      const [open, setOpen] = React.useState({});
       const [translations, setTranslations] = React.useState({});
       const [query, setQuery] = React.useState('');
+      const [stuck, setStuck] = React.useState(true);
       const scrollRef = React.useRef(null);
+      const stickRef = React.useRef(true);
 
       React.useEffect(() => {
         let cancelled = false;
@@ -1950,6 +1967,14 @@ const StickerBoard = () => {
         if (active === null && scenes.length > 0) setActive(scenes[0].scene);
       }, [scenes, active]);
 
+      // Switching conversations starts from a clean slate: no stale open blocks.
+      React.useEffect(() => {
+        setOpen({});
+        setTranslations({});
+        stickRef.current = true;
+        setStuck(true);
+      }, [active]);
+
       React.useEffect(() => {
         if (active === null) {
           setMessages([]);
@@ -1959,7 +1984,10 @@ const StickerBoard = () => {
         const load = async () => {
           try {
             const data = await getJson(`/dsh-to-qq/api/messages?scene=${encodeURIComponent(active)}&limit=80`);
-            if (!cancelled) setMessages(data.messages ?? []);
+            if (cancelled) return;
+            const next = data.messages ?? [];
+            // Same rows: keep the old array so React skips the whole re-render.
+            setMessages(previous => (JSON.stringify(previous) === JSON.stringify(next) ? previous : next));
           } catch (reason) {
             if (!cancelled) setError(String(reason?.message ?? reason));
           }
@@ -1972,15 +2000,31 @@ const StickerBoard = () => {
         };
       }, [active]);
 
+      // Only follow new messages when the reader is already at the bottom.
       React.useEffect(() => {
         const element = scrollRef.current;
-        if (element !== null) element.scrollTop = element.scrollHeight;
-      }, [messages, expanded]);
+        if (element === null || !stickRef.current) return;
+        element.scrollTop = element.scrollHeight;
+      }, [messages]);
 
-      const toggleReasoning = (index) => {
-        const next = expanded === index ? null : index;
-        setExpanded(next);
-        if (next === null) return;
+      const onScroll = () => {
+        const element = scrollRef.current;
+        if (element === null) return;
+        const near = element.scrollHeight - element.scrollTop - element.clientHeight < 64;
+        stickRef.current = near;
+        if (near !== stuck) setStuck(near);
+      };
+
+      const jumpToLatest = () => {
+        const element = scrollRef.current;
+        if (element === null) return;
+        stickRef.current = true;
+        setStuck(true);
+        element.scrollTop = element.scrollHeight;
+      };
+
+      const toggleReasoning = index => {
+        setOpen(current => ({ ...current, [index]: current[index] !== true }));
         const entry = messages[index];
         if (entry === undefined || typeof entry.reasoning !== 'string' || entry.reasoning === '') return;
         if (translations[index] !== undefined) return;
@@ -1995,22 +2039,267 @@ const StickerBoard = () => {
           .catch(reason => setTranslations(current => ({ ...current, [index]: { status: 'error', text: String(reason?.message ?? reason) } })));
       };
 
-      const needle = query.trim();
-      const shown = needle === '' ? scenes : scenes.filter(row => sceneLabel(row.scene).includes(needle));
+      const label = scene => {
+        try {
+          return sceneLabel(scene);
+        } catch {
+          return String(scene);
+        }
+      };
 
-      const rowStyle = row => ({
-        textAlign: 'left',
-        border: 'none',
-        borderRadius: 8,
-        padding: '8px 10px',
-        cursor: 'pointer',
-        color: 'inherit',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 3,
-        fontSize: 12,
-        background: row.scene === active ? 'rgba(77,107,254,.16)' : 'transparent',
+      const needle = query.trim();
+      const shown = needle === '' ? scenes : scenes.filter(row => label(row.scene).includes(needle));
+      const online = state?.transport === 'online';
+
+      // ── left: conversation list ──────────────────────────────────────
+      const rows = shown.map(row => {
+        const isActive = row.scene === active;
+        return h('button', {
+          key: row.scene,
+          type: 'button',
+          onClick: () => setActive(row.scene),
+          style: {
+            textAlign: 'left',
+            border: 'none',
+            borderRadius: 9,
+            padding: '9px 10px',
+            cursor: 'pointer',
+            color: 'inherit',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 9,
+            fontSize: 12,
+            background: isActive ? 'rgba(77,107,254,.12)' : 'transparent',
+            boxShadow: isActive ? 'inset 2px 0 0 #4d6bfe' : 'none',
+            transition: 'background 120ms ease',
+          },
+        },
+        h('span', {
+          style: {
+            width: 8,
+            height: 8,
+            borderRadius: 4,
+            flex: '0 0 8px',
+            background: sceneAccent(row.scene),
+            opacity: isActive ? 1 : 0.5,
+          },
+        }),
+        h('span', { style: { display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 } },
+        h('span', {
+          style: {
+            fontWeight: isActive ? 600 : 500,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          },
+        }, label(row.scene)),
+        h('span', { style: { fontSize: 11, opacity: 0.5 } }, `${row.total} 条 · ${String(row.lastAt ?? '').slice(5, 16)}`)));
       });
+
+      const leftPane = h('div', {
+        style: {
+          width: 264,
+          flex: '0 0 264px',
+          borderRight: `1px solid ${PANEL_BORDER}`,
+          display: 'flex',
+          flexDirection: 'column',
+          minHeight: 0,
+          background: 'rgba(128,128,128,.03)',
+        },
+      },
+      h('div', { style: { padding: '14px 12px 10px', display: 'flex', alignItems: 'center', gap: 8 } },
+      h('span', {
+        style: {
+          width: 26,
+          height: 26,
+          borderRadius: 9,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'linear-gradient(135deg,#4d6bfe,#7a5cf0)',
+          color: '#fff',
+          fontSize: 13,
+          fontWeight: 700,
+        },
+      }, 'Q'),
+      h('span', { style: { fontWeight: 600 } }, 'QQ 对话'),
+      h('span', { style: { marginLeft: 'auto', fontSize: 11, opacity: 0.5 } }, `${scenes.length} 个会话`)),
+      h('div', { style: { padding: '0 12px 10px' } },
+      h('input', {
+        value: query,
+        onChange: event => setQuery(event.target.value),
+        placeholder: '搜索会话',
+        style: {
+          width: '100%',
+          boxSizing: 'border-box',
+          border: `1px solid ${PANEL_BORDER}`,
+          borderRadius: 9,
+          padding: '6px 10px',
+          fontSize: 12,
+          color: 'inherit',
+          background: 'var(--dsw-alias-bg-base, #fff)',
+          outline: 'none',
+        },
+      })),
+      h('div', { style: { overflowY: 'auto', padding: '0 8px 10px', display: 'flex', flexDirection: 'column', gap: 3, minHeight: 0 } },
+      rows,
+      rows.length === 0
+        ? h('div', { style: { opacity: 0.5, padding: 12, fontSize: 12, textAlign: 'center' } }, scenes.length === 0 ? '还没有消息记录' : '没有匹配的会话')
+        : null));
+
+      // ── right: thread ────────────────────────────────────────────────
+      const bubbles = messages.map((entry, index) => {
+        const out = entry.direction === 'out';
+        const hasReasoning = typeof entry.reasoning === 'string' && entry.reasoning !== '';
+        const isOpen = open[index] === true;
+        const translation = translations[index];
+        const name = out ? '我' : String(entry.sender_name ?? '对方');
+        const clock = String(entry.time_bj ?? '').slice(11, 16);
+        const day = String(entry.time_bj ?? '').slice(0, 10);
+        const previousDay = index === 0 ? '' : String(messages[index - 1]?.time_bj ?? '').slice(0, 10);
+        const showDay = index === 0 ? day !== '' : day !== previousDay;
+
+        const parts = [
+          h('div', { style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 13, lineHeight: 1.55 } }, entry.text),
+        ];
+        if (hasReasoning) {
+          parts.push(h('button', {
+            type: 'button',
+            onClick: () => toggleReasoning(index),
+            style: {
+              marginTop: 6,
+              border: 'none',
+              background: out ? 'rgba(255,255,255,.2)' : 'rgba(128,128,128,.16)',
+              color: 'inherit',
+              borderRadius: 20,
+              padding: '2px 9px',
+              fontSize: 11,
+              cursor: 'pointer',
+            },
+          }, `推理 ${isOpen ? '▲' : '▼'}`));
+        }
+        if (isOpen) {
+          const body = [];
+          if (translation?.status === 'loading') body.push('翻译中…');
+          else if (translation?.status === 'ok') body.push(translation.text);
+          else body.push(entry.reasoning);
+          if (translation?.status === 'error') body.push(h('div', { style: { marginTop: 6, opacity: 0.65 } }, `（翻译失败：${translation.text}）`));
+          if (translation?.status === 'unavailable') body.push(h('div', { style: { marginTop: 6, opacity: 0.65 } }, `（自动翻译不可用：${translation.note || '无可用翻译路由'}）`));
+          parts.push(h('div', {
+            style: {
+              marginTop: 7,
+              padding: '8px 10px',
+              borderRadius: 10,
+              background: out ? 'rgba(0,0,0,.18)' : 'rgba(128,128,128,.1)',
+              border: `1px solid ${out ? 'rgba(255,255,255,.18)' : PANEL_BORDER}`,
+              fontFamily: PANEL_MONO,
+              fontSize: 11.5,
+              lineHeight: 1.65,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              maxHeight: 340,
+              overflowY: 'auto',
+            },
+          }, body));
+        }
+
+        const bubble = h('div', {
+          style: {
+            background: out ? 'linear-gradient(135deg,#4d6bfe,#5c72ff)' : 'rgba(128,128,128,.13)',
+            color: out ? '#fff' : 'inherit',
+            borderRadius: 13,
+            borderTopRightRadius: out ? 4 : 13,
+            borderTopLeftRadius: out ? 13 : 4,
+            padding: '8px 11px',
+            boxShadow: out ? '0 1px 2px rgba(40,60,180,.18)' : '0 1px 2px rgba(0,0,0,.05)',
+            minWidth: 0,
+          },
+        }, parts);
+
+        return h('div', {
+          key: `${entry.msg_id}-${entry.time_bj}-${index}`,
+          style: { display: 'flex', flexDirection: 'column', gap: 4 },
+        },
+        showDay ? h('div', { style: { alignSelf: 'center', fontSize: 11, opacity: 0.45, padding: '4px 0' } }, day) : null,
+        h('div', { style: { display: 'flex', flexDirection: out ? 'row-reverse' : 'row', gap: 8, alignItems: 'flex-start' } },
+        h('span', {
+          style: {
+            width: 26,
+            height: 26,
+            borderRadius: 9,
+            flex: '0 0 26px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 11,
+            fontWeight: 600,
+            background: out ? 'rgba(77,107,254,.16)' : 'rgba(128,128,128,.16)',
+            color: out ? '#3b53c9' : 'inherit',
+          },
+        }, out ? '我' : name.slice(0, 1)),
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, maxWidth: '72%', alignItems: out ? 'flex-end' : 'flex-start' } },
+        h('div', { style: { fontSize: 11, opacity: 0.45, padding: '0 2px' } }, `${name} · ${clock}`),
+        bubble)));
+      });
+
+      const header = h('div', {
+        style: {
+          padding: '12px 18px',
+          borderBottom: `1px solid ${PANEL_BORDER}`,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          minHeight: 30,
+        },
+      },
+      h('span', { style: { width: 8, height: 8, borderRadius: 4, background: active === null ? '#999' : sceneAccent(active) } }),
+      h('span', { style: { fontWeight: 600 } }, active === null ? '—' : label(active)),
+      h('span', {
+        style: {
+          fontSize: 11,
+          padding: '1px 7px',
+          borderRadius: 20,
+          background: online ? 'rgba(18,160,106,.12)' : 'rgba(192,57,43,.12)',
+          color: online ? '#0d8a5b' : '#c0392b',
+        },
+      }, state === null ? '读取中' : (online ? '已连接' : String(state.transport ?? '离线'))),
+      h('span', { style: { fontSize: 11, opacity: 0.45 } }, `${messages.length} 条`),
+      error === '' ? null : h('span', { style: { fontSize: 11, color: '#c0392b' } }, error),
+      stuck ? null : h('button', {
+        type: 'button',
+        onClick: jumpToLatest,
+        style: {
+          marginLeft: 'auto',
+          border: `1px solid ${PANEL_BORDER}`,
+          background: 'transparent',
+          color: 'inherit',
+          borderRadius: 20,
+          padding: '2px 10px',
+          fontSize: 11,
+          cursor: 'pointer',
+          opacity: 0.8,
+        },
+      }, '跳到最新 ↓'));
+
+      const thread = h('div', {
+        onScroll,
+        ref: scrollRef,
+        style: {
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          padding: '16px 18px 20px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+          background: 'linear-gradient(180deg, rgba(128,128,128,.04), rgba(0,0,0,0) 140px)',
+        },
+      },
+      bubbles.length === 0
+        ? h('div', { style: { margin: 'auto', opacity: 0.45, fontSize: 12 } }, '这个会话还没有记录')
+        : bubbles);
+
+      const rightPane = h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 } }, header, thread);
 
       return h('div', {
         style: {
@@ -2022,111 +2311,7 @@ const StickerBoard = () => {
           color: 'var(--dsw-alias-label-primary, #1c1f24)',
           fontSize: 13,
         },
-      },
-      h('div', {
-        style: {
-          width: 260,
-          flex: '0 0 260px',
-          borderRight: `1px solid ${PANEL_BORDER}`,
-          display: 'flex',
-          flexDirection: 'column',
-          minHeight: 0,
-        },
-      },
-      h('div', {
-        style: { padding: '12px 12px 10px', borderBottom: `1px solid ${PANEL_BORDER}`, display: 'flex', flexDirection: 'column', gap: 8 },
-      },
-      h('div', { style: { fontWeight: 600 } }, 'QQ 对话'),
-      h('input', {
-        value: query,
-        onChange: event => setQuery(event.target.value),
-        placeholder: '搜索会话',
-        style: {
-          border: `1px solid ${PANEL_BORDER}`,
-          borderRadius: 8,
-          padding: '5px 8px',
-          fontSize: 12,
-          color: 'inherit',
-          background: 'transparent',
-          outline: 'none',
-        },
-      })),
-      h('div', { style: { overflowY: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 2, minHeight: 0 } },
-        shown.map(row => h('button', {
-          key: row.scene,
-          type: 'button',
-          onClick: () => setActive(row.scene),
-          style: rowStyle(row),
-        },
-        h('span', { style: { fontWeight: 600 } }, sceneLabel(row.scene)),
-        h('span', { style: { opacity: 0.55 } }, `${row.total} 条 · ${String(row.lastAt ?? '').slice(5, 16)}`))),
-        shown.length === 0
-          ? h('div', { style: { opacity: 0.55, padding: 8, fontSize: 12 } }, scenes.length === 0 ? '还没有消息记录。' : '没有匹配的会话。')
-          : null)),
-      h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 } },
-        h('div', {
-          style: {
-            padding: '12px 16px',
-            borderBottom: `1px solid ${PANEL_BORDER}`,
-            display: 'flex',
-            alignItems: 'baseline',
-            gap: 10,
-          },
-        },
-        h('span', { style: { fontWeight: 600 } }, active === null ? '—' : sceneLabel(active)),
-        h('span', { style: { fontSize: 11, opacity: 0.55 } },
-          state === null ? '读取状态…' : `连接 ${state.transport} · ${messages.length} 条`),
-        error === '' ? null : h('span', { style: { fontSize: 11, color: '#c0392b' } }, error)),
-        h('div', { style: { flex: 1, minHeight: 0, overflowY: 'auto', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8 }, ref: scrollRef },
-          messages.length === 0
-            ? h('div', { style: { opacity: 0.55 } }, '这个会话还没有记录。')
-            : messages.map((entry, index) => {
-              const hasReasoning = typeof entry.reasoning === 'string' && entry.reasoning !== '';
-              const isOpen = expanded === index;
-              const translation = translations[index];
-              return h('div', {
-                key: `${entry.msg_id}-${index}-${entry.time_bj}`,
-                onClick: hasReasoning ? () => toggleReasoning(index) : undefined,
-                style: {
-                  alignSelf: entry.direction === 'out' ? 'flex-end' : 'flex-start',
-                  maxWidth: '76%',
-                  background: entry.direction === 'out' ? 'rgba(77,107,254,.14)' : 'rgba(128,128,128,.14)',
-                  borderRadius: 10,
-                  padding: '7px 10px',
-                  cursor: hasReasoning ? 'pointer' : 'default',
-                },
-              },
-              h('div', { style: { fontSize: 11, opacity: 0.55, marginBottom: 2 } },
-                `${entry.direction === 'out' ? 'DSH' : entry.sender_name} · ${String(entry.time_bj).slice(11, 16)}`),
-              h('div', { style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, entry.text),
-              hasReasoning
-                ? h('div', { style: { fontSize: 11, opacity: 0.6, marginTop: 4 } }, isOpen ? '收起推理 ▲' : '查看推理 ▼')
-                : null,
-              isOpen
-                ? h('div', {
-                  style: {
-                    marginTop: 6,
-                    paddingTop: 6,
-                    fontSize: 11,
-                    opacity: 0.78,
-                    borderTop: '1px dashed rgba(128,128,128,.35)',
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                  },
-                },
-                translation?.status === 'ok'
-                  ? translation.text
-                  : translation?.status === 'loading'
-                    ? '翻译中…'
-                    : entry.reasoning,
-                translation?.status === 'error'
-                  ? h('div', { style: { opacity: 0.6, marginTop: 4 } }, `（翻译失败：${translation.text}）`)
-                  : null,
-                translation?.status === 'unavailable'
-                  ? h('div', { style: { opacity: 0.55, marginTop: 4 } }, `（自动翻译不可用：${translation.note || '无可用翻译路由'}）`)
-                  : null)
-                : null);
-            }))));
+      }, leftPane, rightPane);
     };
 
     /** Slot entry for the settings surface. */
