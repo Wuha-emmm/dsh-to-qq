@@ -276,17 +276,18 @@ class Archive {
    * @param {string} scene Scene key.
    * @param {number} beforeTime Unix seconds; only older rows are returned.
    * @param {number} [limit] Maximum lines.
-   * @returns {{ time: number, name: string, text: string }[]} Digest lines oldest-first.
+   * @returns {{ id: number, time: number, name: string, text: string }[]} Digest lines oldest-first.
    */
   digestEntries(scene, beforeTime, limit = 80) {
     const rows = this.db.prepare(`
-      SELECT sender_name, time_unix, text, direction
+      SELECT id, sender_name, time_unix, text, direction
       FROM messages
       WHERE scene = ? AND time_unix < ?
       ORDER BY time_unix DESC, id DESC
       LIMIT ?
     `).all(scene, Number(beforeTime) || Number.MAX_SAFE_INTEGER, Math.min(200, Math.max(1, limit)));
     return rows.reverse().map(row => ({
+      id: Number(row.id) || 0,
       time: Number(row.time_unix) || 0,
       name: (row.direction ?? 'in') === 'out' ? '我' : (row.sender_name ?? '对方'),
       text: (row.text ?? '').replace(/\s+/g, ' ').slice(0, 40),

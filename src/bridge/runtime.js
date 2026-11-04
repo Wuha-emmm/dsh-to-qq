@@ -21,7 +21,7 @@ import { toImageSource } from '../tools/send.js';
 import { admit, blockedWord, tierOf, withoutSelfMention } from '../policy/tiers.js';
 import { Quota, Semaphore } from '../policy/quota.js';
 import { looksLikeApproval } from '../policy/approvals.js';
-import { SceneBuffer, renderContext } from '../context/buffer.js';
+import { SceneBuffer, contextHeader, renderContext } from '../context/buffer.js';
 import { InjectionTracker, entrySignature } from '../context/injection.js';
 import { formatRecap } from '../context/recap.js';
 import { renderCard } from '../memory/store.js';
@@ -394,6 +394,15 @@ export class Bridge {
      * @type {Map<string, number>}
      */
     this.replayBudget = new Map();
+    /**
+     * Scene → newest digest row already sent. The digest is stable, so sending
+     * the same thirty lines every turn pays for them again and again; only the
+     * rows past this watermark are new. Cleared on compaction, when the whole
+     * ledger is replayed anyway.
+     *
+     * @type {Map<string, number>}
+     */
+    this.digestSent = new Map();
     /** Turns on disk until delivery is confirmed, so a reload can repair them. */
     this.pendingTurns = typeof options.stateDir === 'string' && options.stateDir !== ''
       ? new PendingTurns(join(options.stateDir, 'pending-turns.json'))
@@ -1462,6 +1471,9 @@ export class Bridge {
         // The transcript just lost its detail: replay the newest lines only, so
         // the model gets its footing back without re-paying the whole window.
         this.replayBudget.set(message.scene, 15);
+        // The compaction summary is prose: it keeps the gist and loses the ids.
+        // Forget the digest watermark too, so the next turn re-sends its tail.
+        this.digestSent.delete(message.scene);
         this.compactionStats = { count: (this.compactionStats?.count ?? 0) + 1, lastAt: Date.now() };
         this.log(`history compacted for ${message.scene}; anchors will be re-sent`);
       }
@@ -1855,6 +1867,7 @@ export class Bridge {
     const cleared = this.injections.size;
     this.injections.clear();
     this.replayBudget?.clear();
+    this.digestSent.clear();
     this.rebuildMarks.clear();
     await this.#loadRebuildMarks();
     this.log('restore: injection ledger and rebuild marks reloaded');
@@ -2209,11 +2222,44 @@ export class Bridge {
       : this.buffer.recent(message.scene, depth).slice(0, -1);
     const entries = injection === undefined ? source : injection.delta(source);
     const oldest = source.length > 0 ? Math.min(...source.map(entry => Number(entry.time) || 0)) : 0;
-    const earlier = oldest > 0 ? (this.archive?.digestEntries?.(message.scene, oldest, 30) ?? []) : [];
+    const earlier = this.#digestLines(message.scene, oldest);
     const earlierStats = oldest > 0 ? this.archive?.olderStats?.(message.scene, oldest) : undefined;
-    const context = renderContext({ entries, earlier, earlierStats, privateChat: true, maxChars: 4000 });
-    const parts = [card, context, body + quote].filter(part => part !== '');
+    const context = renderContext({
+      entries,
+      earlier,
+      earlierStats,
+      privateChat: true,
+      header: false,
+      maxChars: 4000,
+    });
+    const header = injection === undefined ? contextHeader(true) : injection.fixed('ctxhdr-dm', contextHeader(true), message.scene);
+    const parts = [card, header, context, body + quote].filter(part => part !== '');
     return parts.join('\n\n');
+  }
+
+  /**
+   * The digest lines this turn still owes the model.
+   *
+   * Older lines never change once written, so paying for the same thirty on
+   * every turn is waste; each turn sends only the rows past the watermark.
+   * A cold start (or the first turn after a compaction) has no watermark, so it
+   * gets the newest handful instead of the whole tail.
+   *
+   * @param {string} scene Scene key.
+   * @param {number} oldest Oldest timestamp still inside the live window.
+   * @returns {{ id: number, time: number, name: string, text: string }[]} Lines to inject.
+   */
+  #digestLines(scene, oldest) {
+    if (!(oldest > 0)) return [];
+    const rows = this.archive?.digestEntries?.(scene, oldest) ?? [];
+    if (rows.length === 0) return [];
+    const watermark = this.digestSent.get(scene);
+    const fresh = watermark === undefined
+      ? rows.slice(-10)
+      : rows.filter(row => Number(row.id) > watermark);
+    const newest = Number(rows[rows.length - 1].id) || 0;
+    if (newest > 0) this.digestSent.set(scene, newest);
+    return fresh;
   }
 
   /**
@@ -2353,7 +2399,7 @@ export class Bridge {
     // Past the edge of the window the model used to be blind, so it invented
     // who had asked what. A truncated one-liner digest keeps the thread cheap.
     const oldest = source.length > 0 ? Math.min(...source.map(entry => Number(entry.time) || 0)) : 0;
-    const earlier = oldest > 0 ? (this.archive?.digestEntries?.(message.scene, oldest) ?? []) : [];
+    const earlier = this.#digestLines(message.scene, oldest);
     const earlierStats = oldest > 0 ? this.archive?.olderStats?.(message.scene, oldest) : undefined;
     const cached = message.replyTo === undefined ? undefined : this.buffer.find(message.scene, message.replyTo);
     const quoted = quotedText ?? (cached === undefined ? undefined : `${cached.senderName}: ${cached.text}`);
@@ -2362,6 +2408,7 @@ export class Bridge {
       earlier,
       earlierStats,
       quoted,
+      header: false,
       maxChars: config.conversation.groupCharCap,
     });
     // Everyone in a group shares one session, so the window also contains what
@@ -2374,8 +2421,9 @@ export class Bridge {
       `【作用域】这次向你提问的是 ${message.senderName}(${message.senderId})。上下文里出现过的记忆卡只属于卡头写的那个人，只照【当前提问】这个人说话；别人的称呼习惯、人设、印象一律不要往对方身上套。`,
       message.senderId,
     );
+    const header = injection.fixed('ctxhdr', contextHeader(false), message.scene);
     const ask = `【当前提问】${message.senderName}(${message.senderId}): ${message.text === '' ? '（非文本消息）' : message.text}`;
-    const parts = [card, block, privacy, scope, ask].filter(part => part !== '');
+    const parts = [card, header, block, privacy, scope, ask].filter(part => part !== '');
     return parts.join('\n\n');
   }
 
