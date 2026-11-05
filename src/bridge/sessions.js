@@ -601,16 +601,23 @@ export class DshDriver {
     // A turn is only "stuck" when nothing happens for a long time, not when it
     // simply takes long: a slow conversion that keeps emitting tool calls is
     // healthy. The watchdog watches activity, so waiting has no total cap.
-    const idleMs = Number(request.idleTimeoutMs) > 0 ? Number(request.idleTimeoutMs) : 300_000;
-    let lastActivity = Date.now();
-    let heartbeatAt = Date.now();
+    // Two modes, on purpose. `idleTimeoutMs` is the healthy one: it only fires
+    // when nothing moves. `timeoutMs` is the legacy wall-clock cap, still
+    // honored for callers that ask for it explicitly (and for the tests).
+    const idleMs = Number(request.idleTimeoutMs) > 0 ? Number(request.idleTimeoutMs) : 0;
+    const totalMs = idleMs > 0 ? 0 : (Number(request.timeoutMs) > 0 ? Number(request.timeoutMs) : 300_000);
+    const startedAt = Date.now();
+    let lastActivity = startedAt;
+    let heartbeatAt = startedAt;
     const watchdog = setInterval(() => {
       const now = Date.now();
       if (now - heartbeatAt >= 30_000) {
         heartbeatAt = now;
         request.onProgress?.({ idleMs: now - lastActivity });
       }
-      if (now - lastActivity < idleMs) return;
+      const spent = idleMs > 0 ? now - lastActivity : now - startedAt;
+      const budget = idleMs > 0 ? idleMs : totalMs;
+      if (spent < budget) return;
       this.log(`turn idle for ${Math.round((now - lastActivity) / 1000)}s in ${sessionId}; treating it as stuck`);
       abort.abort();
       try {
@@ -618,8 +625,11 @@ export class DshDriver {
       } catch {
         // The turn may already be gone; nothing to cancel.
       }
-      settle('hung');
+      settle(idleMs > 0 ? 'hung' : 'timeout');
     }, 1000);
+    // Never hold the process open: a rejected prompt throws before the turn
+    // reaches the code that clears the interval.
+    watchdog.unref?.();
     const forwardAbort = () => abort.abort();
     request.signal?.addEventListener('abort', forwardAbort, { once: true });
 
@@ -749,6 +759,7 @@ export class DshDriver {
       const waited = Math.round((Date.now() - lastActivity) / 1000);
       throw new Error(`卡住了：${waited} 秒没有任何动作`);
     }
+    if (outcome === 'timeout') throw new Error('turn timed out');
     if (outcome === 'aborted') throw new Error('cancelled');
     if (outcome instanceof Error) throw outcome;
 
