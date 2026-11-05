@@ -297,6 +297,27 @@ export class DshDriver {
   }
 
   /**
+   * Report whether the bound session is still usable.
+   *
+   * A turn that ends without a word has two very different causes: the session
+   * was archived or deleted, or the turn was cut short (a timeout, a crash).
+   * Only the first one justifies dropping the binding.
+   *
+   * @param {string} scene Scene key.
+   * @returns {Promise<'live' | 'archived' | 'missing' | 'unknown'>} Binding state.
+   */
+  async stateOf(scene) {
+    const existing = this.map.get(scene);
+    if (typeof existing !== 'string' || existing === '') return 'missing';
+    try {
+      return await this.#bindingState(existing);
+    } catch (error) {
+      this.log(`binding state check failed: ${String(error?.message ?? error).slice(0, 120)}`);
+      return 'unknown';
+    }
+  }
+
+  /**
    * Drop a binding whose session stopped being usable.
    *
    * An archived or vanished session still accepts a prompt and then finishes

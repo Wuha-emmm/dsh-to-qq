@@ -1583,15 +1583,23 @@ export class Bridge {
         return;
       }
       if (rawBody === '') {
-        // No prose at all: an archived or deleted session answers a prompt and
-        // then ends silently. Report it and drop the binding so the next message
-        // opens a fresh session instead of replaying this empty turn forever.
-        this.log(`empty turn for ${message.scene}; dropping the session binding`);
-        try {
-          await this.driver?.invalidate?.(message.scene, 'empty-turn');
-        } catch (error) {
-          this.log(`invalidate failed: ${String(error?.message ?? error).slice(0, 120)}`);
+        // No prose at all. That means either the session was archived or deleted
+        // (it accepts a prompt and finishes silently), or the turn was cut short
+        // — a timeout leaves no text either, and dropping the binding then would
+        // tell the person their session vanished when it is perfectly fine.
+        const state = await this.driver?.stateOf?.(message.scene);
+        const gone = state === 'archived' || state === 'missing';
+        if (gone) {
+          this.log(`empty turn for ${message.scene} (${state}); dropping the session binding`);
+          try {
+            await this.driver?.invalidate?.(message.scene, 'empty-turn');
+          } catch (error) {
+            this.log(`invalidate failed: ${String(error?.message ?? error).slice(0, 120)}`);
+          }
+        } else {
+          this.log(`empty turn for ${message.scene} (${state ?? 'unknown'}); keeping the binding`);
         }
+        rawBody = gone ? '' : '（这轮我没吐出文字，多半是活跑到一半被掐断了；你再说一次，或者让我接着干）';
       }
       const body = rawBody === ''
         ? '（这条会话归档或不见了，我换了一条新的，你再说一次）'
