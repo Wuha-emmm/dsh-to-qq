@@ -1523,6 +1523,7 @@ export class Bridge {
         cwd: config.conversation.cwd,
         idleTimeoutMs: config.limits.turnIdleMs,
         onProgress: progress => this.#noteProgress(message, progress),
+        onLongTool: info => this.#noteLongTool(message, info),
         tier,
         onSession: sessionId => {
           const tracker = this.injections.get(message.scene);
@@ -1820,6 +1821,7 @@ export class Bridge {
         cwd: config.conversation.cwd,
         idleTimeoutMs: config.limits.turnIdleMs,
         onProgress: progress => this.#noteProgress(message, progress),
+        onLongTool: info => this.#noteLongTool(message, info),
         tier: 'owner',
       });
       const body = String(result?.text ?? '').trim();
@@ -2274,6 +2276,24 @@ export class Bridge {
   }
 
   /**
+   * Say that a tool has been running a long time, without touching the turn.
+   *
+   * A long build is not a fault: the only thing to do is tell the person it is
+   * still going and let it finish. The session side throttles this to once every
+   * ten minutes, so a two-hour conversion costs a handful of lines.
+   *
+   * @param {import('./events.js').QQMessage} message Triggering message.
+   * @param {{ ms?: number }} info How long the oldest open call has been running.
+   * @returns {void}
+   */
+  #noteLongTool(message, info) {
+    const minutes = Math.round(Number(info?.ms ?? 0) / 60_000);
+    this.log(`long tool call in ${message.scene}: ${minutes} min, still running`);
+    void this.sendText(message, `有个工具已经跑了 ${minutes} 分钟，还在跑。我不动它，出结果再报。`)
+      .catch(error => this.log(`long tool notice failed: ${String(error?.message ?? error).slice(0, 120)}`));
+  }
+
+  /**
    * Report a failed turn once, whatever path noticed it first.
    *
    * A turn that dies can be seen by two code paths — the normal flow and the
@@ -2716,6 +2736,7 @@ export class Bridge {
         cwd: config.conversation.cwd,
         idleTimeoutMs: config.limits.turnIdleMs,
         onProgress: progress => this.#noteProgress(message, progress),
+        onLongTool: info => this.#noteLongTool(message, info),
         tier,
       });
       const text = String(retry?.text ?? '').trim();

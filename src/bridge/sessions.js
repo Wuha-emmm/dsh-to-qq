@@ -611,9 +611,11 @@ export class DshDriver {
     let heartbeatAt = startedAt;
     // A single long tool call is silent by nature: `tool/call` arrives, then
     // nothing until `tool/result` minutes later. Counting that silence as death
-    // killed a healthy PDF build, so an open tool call keeps the turn alive —
-    // with its own ceiling, so a wedged tool still cannot hang forever.
+    // killed a healthy PDF build, so an open tool call keeps the turn alive.
+    // It is never killed for being slow: past the threshold the person just gets
+    // reminded that the tool is still running.
     const openCalls = new Map();
+    let longToolNoticeAt = 0;
     const toolCapMs = Number(request.toolTimeoutMs) > 0 ? Number(request.toolTimeoutMs) : 20 * 60_000;
     const watchdog = setInterval(() => {
       const now = Date.now();
@@ -622,16 +624,9 @@ export class DshDriver {
         request.onProgress?.({ idleMs: now - lastActivity });
       }
       const oldestCall = openCalls.size === 0 ? 0 : Math.min(...openCalls.values());
-      if (oldestCall > 0 && now - oldestCall >= toolCapMs) {
-        this.log(`tool call open for ${Math.round((now - oldestCall) / 1000)}s in ${sessionId}; treating it as stuck`);
-        abort.abort();
-        try {
-          this.controller.cancel({ sessionId });
-        } catch {
-          // The turn may already be gone; nothing to cancel.
-        }
-        settle('hung');
-        return;
+      if (oldestCall > 0 && now - oldestCall >= toolCapMs && now - longToolNoticeAt >= 10 * 60_000) {
+        longToolNoticeAt = now;
+        request.onLongTool?.({ ms: now - oldestCall });
       }
       if (openCalls.size > 0) return;
       const spent = idleMs > 0 ? now - lastActivity : now - startedAt;
