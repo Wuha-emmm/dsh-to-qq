@@ -277,9 +277,11 @@ export class DshDriver {
     if (typeof existing === 'string' && existing !== '') {
       // An archived session still answers prompts, so the mapping would look
       // healthy while every message landed in a session the sidebar hides.
-      // Rebind instead, and let the old one stay archived where it is.
-      if (!(await this.#isArchived(existing))) return existing;
-      this.log(`session ${existing} for ${scene} was archived; binding a fresh one`);
+      // The host also drops archived rows from `list`, so a binding missing
+      // there is stale too. Rebind instead of writing into the void.
+      const state = await this.#bindingState(existing);
+      if (state === 'live') return existing;
+      this.log(`session ${existing} for ${scene} is ${state}; binding a fresh one`);
       await this.map.remove(scene);
       this.archivedCache = undefined;
     }
@@ -345,22 +347,23 @@ export class DshDriver {
   }
 
   /**
-   * Whether the host has archived a session.
+   * Whether a bound session can still receive messages.
    *
    * Every inbound message asks, and archiving is rare, so the answer is reused
-   * for a few seconds. A failed list is treated as "not archived" on purpose:
-   * falling back to the existing binding keeps chatting alive, while inventing
-   * a new session on every transient error would scatter the history.
+   * for a few seconds. A failed or empty list keeps the existing binding on
+   * purpose: treating a transient error as "missing" would scatter the history
+   * across sessions nothing points at any more.
    *
    * @param {string} sessionId Candidate session.
-   * @returns {Promise<boolean>} True when the host lists it as archived.
+   * @returns {Promise<'live' | 'archived' | 'missing' | 'unknown'>} Its state.
    */
-  async #isArchived(sessionId) {
+  async #bindingState(sessionId) {
     const now = Date.now();
     if (this.archivedCache !== undefined && now - this.archivedAt < 5000) {
-      return this.archivedCache.has(sessionId);
+      return this.archivedCache.get(sessionId) ?? 'live';
     }
-    const archived = new Set();
+    /** @type {Map<string, 'live' | 'archived'>} */
+    const states = new Map();
     try {
       const value = await this.controller.list({}, AbortSignal.timeout(8000));
       const raw = Array.isArray(value)
@@ -369,17 +372,19 @@ export class DshDriver {
           : Array.isArray(value?.sessions) ? value.sessions
             : [];
       for (const item of raw) {
-        if (item === null || typeof item !== 'object' || item.archived !== true) continue;
+        if (item === null || typeof item !== 'object') continue;
         const id = item.id ?? item.sessionId;
-        if (typeof id === 'string') archived.add(id);
+        if (typeof id !== 'string' || id === '') continue;
+        states.set(id, item.archived === true ? 'archived' : 'live');
       }
     } catch (error) {
       this.log(`session list failed: ${String(error?.message ?? error).slice(0, 120)}`);
-      return false;
+      return 'unknown';
     }
-    this.archivedCache = archived;
+    this.archivedCache = states;
     this.archivedAt = now;
-    return archived.has(sessionId);
+    if (states.size === 0) return 'unknown';
+    return states.get(sessionId) ?? 'missing';
   }
 
   /**
