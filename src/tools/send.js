@@ -41,7 +41,7 @@ export function registerQqSendTool(ctx, options) {
   return ctx.tools.register({
     name: 'qq_send',
     description:
-      'Send something into the current QQ conversation: text, an image, or a file. Use it when the user asks you to send/receive a file or a screenshot. Text without an attachment is never sent on its own — it is merged into this turn\'s reply, so calling it cannot produce a second copy of what you are already about to say. With an image, the text is a caption: a short one reads as a label, and a long one is merged into this turn\'s reply (nothing is truncated, and a caption already inside the reply is not repeated). Local images/files are administrator only.',
+      'Send something into the current QQ conversation: text, an image, or a file. Use it when the user asks you to send/receive a file or a screenshot. Text without an attachment is never sent on its own — it is merged into this turn\'s reply, so calling it cannot produce a second copy of what you are already about to say. With an image, the text is a caption: a short one reads as a label, and a long one is merged into this turn\'s reply (nothing is truncated, and a caption already inside the reply is not repeated). Local images/files are administrator only. A file is only reported as sent when OneBot returns its message id; if the report has no `#id`, treat it as unconfirmed and say so instead of claiming delivery.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -133,8 +133,9 @@ export function registerQqSendTool(ctx, options) {
         const source = await toUploadSource(path);
         const result = await bridge.client.call(upload, { ...baseParams, file: source, name }, { timeoutMs: 120_000 });
         assertOneBotOk(result, upload);
-        sent.push(`file:${name}`);
-        bridge.recordSceneOutbound?.(context.scene, `[文件] ${name}`, 'file');
+        const fileId = Number(result?.message_id ?? result?.data?.message_id ?? 0) || 0;
+        sent.push(fileId === 0 ? `file:${name}` : `file:${name}#${fileId}`);
+        bridge.recordSceneOutbound?.(context.scene, `[文件] ${name}`, 'file', fileId);
       }
       if (sent.length === 0) throw new Error('nothing to send: pass text, image, or file');
 

@@ -617,9 +617,10 @@ export class Bridge {
    * @param {string} scene Scene key, e.g. `group:20001`.
    * @param {string} text What was sent.
    * @param {string} [mediaKind] `image`, `file`, or undefined.
+   * @param {number} [messageId] The id OneBot returned, so a claim can be checked.
    * @returns {void}
    */
-  recordSceneOutbound(scene, text, mediaKind) {
+  recordSceneOutbound(scene, text, mediaKind, messageId) {
     if (this.archive === null || this.archive === undefined) return;
     const inGroup = scene.startsWith('group:');
     const id = Number(scene.slice(scene.indexOf(':') + 1));
@@ -629,7 +630,7 @@ export class Bridge {
       scene,
       peerId: id,
       groupId: inGroup ? id : undefined,
-    }, text, mediaKind);
+    }, text, mediaKind, undefined, Number(messageId) || 0);
   }
 
   /**
@@ -2708,6 +2709,11 @@ export class Bridge {
       const source = await toUploadSource(item.file);
       const uploaded = await client.call(upload, { ...params, file: source, name }, { timeoutMs: 120_000 });
       assertOneBotOk(uploaded, upload);
+      // The file travels as its own message, so it gets its own receipt: without
+      // this row a later claim of "sent" cannot be checked against anything.
+      const fileId = Number(uploaded?.message_id ?? uploaded?.data?.message_id ?? 0) || 0;
+      this.recordOutbound(message, `[文件] ${name}`, 'file', undefined, fileId);
+      this.log(`file sent for ${message.scene}: ${name} (id ${fileId})`);
     }
     this.recordOutbound(message, text === '' ? '[图片]' : text, images.length > 0 ? 'image' : undefined, reasoning, sentId);
     this.#noteDelivery(message.scene, [text]);
