@@ -18,6 +18,7 @@ import { createBackup, listBackups, removeBackup, pruneAutoBackups, backupDirect
 import { restoreBackup } from './backup/restore.js';
 import { pickRoute } from './llm/route.js';
 import { estimateCost, cacheRate } from './llm/cost.js';
+import { collectSubagentUsage, sessionCacheDir } from './llm/subagent-usage.js';
 import { panelAccess } from './web/guard.js';
 import { pruneMedia } from './media/prune.js';
 import { detectMediaType } from './media/inbound.js';
@@ -1141,11 +1142,27 @@ export function apply(ctx) {
           row.started_at,
           { searchCalls: row.search_calls, fetchCalls: row.fetch_calls },
         ));
+        // Subagents run as their own DSH sessions and never reach the bridge, so
+        // their tokens are invisible to `archive.db`; fold them back in here.
+        const profileDir = dirname(dirname(store.file));
+        const subagents = await collectSubagentUsage({
+          dir: sessionCacheDir(profileDir),
+          prices,
+          sinceMs: midnight.getTime(),
+        });
+        const dayCost = dayEstimates.every(item => item.cost !== null)
+          ? dayEstimates.reduce((sum, item) => sum + (item.cost ?? 0), 0)
+          : null;
+        const combinedCost = dayCost === null || subagents.totals.cost === null
+          ? dayCost
+          : dayCost + subagents.totals.cost;
         send(200, {
           prices,
           today: {
             ...totals,
-            cost: dayEstimates.every(item => item.cost !== null) ? dayEstimates.reduce((sum, item) => sum + (item.cost ?? 0), 0) : null,
+            cost: combinedCost,
+            bridgeCost: dayCost,
+            subagents,
             offPeakTurns: dayEstimates.filter(item => item.offPeak).length,
             calls: dayEstimates.reduce((sum, item) => sum + (item.calls ?? 0), 0),
             cacheRate: cacheRate(totals),

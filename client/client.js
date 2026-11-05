@@ -1046,7 +1046,11 @@ window.__ModuleLoader__.load({
             h('div', { style: UI.muted },
               today === undefined
                 ? '读取中…'
-                : `${today.turns} 轮（谷时 ${today.offPeakTurns ?? 0}） · 输入 ${today.input} / 输出 ${today.output} / 缓存命中 ${today.cache}（${pct(today.cacheRate)}） · 检索 ${today.calls ?? 0} 次 · ${money(today.cost)}`)),
+                : `${today.turns} 轮（谷时 ${today.offPeakTurns ?? 0}） · 输入 ${today.input} / 输出 ${today.output} / 缓存命中 ${today.cache}（${pct(today.cacheRate)}） · 检索 ${today.calls ?? 0} 次 · ${money(today.cost)}`),
+            h('div', { style: UI.muted },
+              today?.subagents === undefined || (today.subagents.totals?.sessions ?? 0) === 0
+                ? ''
+                : `子智能体 ${today.subagents.totals.sessions} 个 · 输入 ${today.subagents.totals.input} / 输出 ${today.subagents.totals.output} / 缓存 ${today.subagents.totals.cache} · ${money(today.subagents.totals.cost)}`)),
           h('button', { type: 'button', onClick: load, style: UI.ghost }, '刷新')),
         h('div', { style: { ...UI.muted, margin: '6px 0 10px' } },
           data?.prices !== undefined && data.prices.input === 0 && data.prices.output === 0 && data.prices.cache === 0
