@@ -424,6 +424,10 @@ export class Bridge {
      * @type {Map<string, number>}
      */
     this.digestSent = new Map();
+    /** Scene -> epoch ms of the last "still working" notice, so it stays rare. */
+    this.progressNotices = new Map();
+    /** Scene -> epoch ms of the last failure notice, so two paths cannot both speak. */
+    this.failureNoticeAt = new Map();
     /** Turns on disk until delivery is confirmed, so a reload can repair them. */
     this.pendingTurns = typeof options.stateDir === 'string' && options.stateDir !== ''
       ? new PendingTurns(join(options.stateDir, 'pending-turns.json'))
@@ -1517,7 +1521,8 @@ export class Bridge {
         text,
         content: [{ type: 'text', text }, ...images],
         cwd: config.conversation.cwd,
-        timeoutMs: config.limits.turnTimeoutMs,
+        idleTimeoutMs: config.limits.turnIdleMs,
+        onProgress: progress => this.#noteProgress(message, progress),
         tier,
         onSession: sessionId => {
           const tracker = this.injections.get(message.scene);
@@ -1650,7 +1655,7 @@ export class Bridge {
       // The picture was already produced; deliver it rather than dropping it into
       // the next turn, where it would look like a stray screenshot.
       await this.#flushMedia(message, '').catch(flushError => this.log(`media flush failed after error: ${flushError?.message ?? flushError}`));
-      await this.sendText(message, `我这边出错了：${String(error?.message ?? error).slice(0, 200)}`);
+      await this.#reportFailure(message, String(error?.message ?? error));
     } finally {
       this.archive?.insertTurn({
         scene: message.scene,
@@ -1813,7 +1818,8 @@ export class Bridge {
         text: promptText,
         content: [{ type: 'text', text: promptText }],
         cwd: config.conversation.cwd,
-        timeoutMs: config.limits.turnTimeoutMs,
+        idleTimeoutMs: config.limits.turnIdleMs,
+        onProgress: progress => this.#noteProgress(message, progress),
         tier: 'owner',
       });
       const body = String(result?.text ?? '').trim();
@@ -1836,7 +1842,7 @@ export class Bridge {
       this.lastReply.set(message.scene, body);
     } catch (error) {
       await this.#flushMedia(message, '').catch(flushError => this.log(`media flush failed after approval: ${flushError?.message ?? flushError}`));
-      await this.sendText(message, `继续执行失败：${String(error?.message ?? error).slice(0, 160)}`);
+      await this.#reportFailure(message, String(error?.message ?? error));
     } finally {
       await this.setTyping?.(message, false);
     }
@@ -2245,6 +2251,63 @@ export class Bridge {
   }
 
   /**
+   * Say once in a while that a long turn is still alive.
+   *
+   * A slow conversion is indistinguishable from a dead one unless the bridge
+   * speaks up; the notice is capped to one per five minutes so a long job costs
+   * a couple of lines, not a stream of them.
+   *
+   * @param {import('./events.js').QQMessage} message Triggering message.
+   * @param {{ idleMs?: number }} progress Heartbeat from the turn watchdog.
+   * @returns {void}
+   */
+  #noteProgress(message, progress) {
+    const now = Date.now();
+    const last = this.progressNotices.get(message.scene) ?? 0;
+    if (now - last < 5 * 60_000) return;
+    this.progressNotices.set(message.scene, now);
+    const idleSec = Math.round(Number(progress?.idleMs ?? 0) / 1000);
+    const text = idleSec >= 60
+      ? `还在跑，最近一次动作在 ${idleSec} 秒前；连续 5 分钟没动静我才会当它卡住。`
+      : `还在跑，刚刚还有动作（${idleSec} 秒前）。`;
+    void this.sendText(message, text).catch(error => this.log(`progress notice failed: ${String(error?.message ?? error).slice(0, 120)}`));
+  }
+
+  /**
+   * Report a failed turn once, whatever path noticed it first.
+   *
+   * A turn that dies can be seen by two code paths — the normal flow and the
+   * approval continuation — and both used to speak, so one failure arrived as
+   * two contradictory messages. Whoever is first says it; the rest only log.
+   *
+   * @param {import('./events.js').QQMessage} message Triggering message.
+   * @param {string} reason Error text.
+   * @returns {Promise<void>} Resolves after the decision.
+   */
+  async #reportFailure(message, reason) {
+    const now = Date.now();
+    const last = this.failureNoticeAt.get(message.scene) ?? 0;
+    const hung = /卡住了/.test(reason);
+    if (hung) {
+      // A stuck session is not trustworthy any more: the next message should
+      // open a fresh one instead of queueing behind a turn that never ended.
+      try {
+        await this.driver?.invalidate?.(message.scene, 'hung-turn');
+      } catch (error) {
+        this.log(`invalidate after hang failed: ${String(error?.message ?? error).slice(0, 120)}`);
+      }
+    }
+    if (now - last < 20_000) {
+      this.log(`failure notice suppressed for ${message.scene}: ${reason.slice(0, 80)}`);
+      return;
+    }
+    this.failureNoticeAt.set(message.scene, now);
+    const text = hung
+      ? `上一轮卡住了（${reason}）。我把这个会话放下了，下一条消息我换一条新的接着干。`
+      : `我这边出错了：${reason.slice(0, 200)}`;
+    await this.sendText(message, text);
+  }
+  /**
    * Deliver replies a previous instance recorded but never confirmed.
    *
    * A reload between the Host's `turn/end` and the send disposes the instance and
@@ -2651,7 +2714,8 @@ export class Bridge {
         text: DEBRIS_RETRY_NUDGE,
         content: [{ type: 'text', text: DEBRIS_RETRY_NUDGE }],
         cwd: config.conversation.cwd,
-        timeoutMs: config.limits.turnTimeoutMs,
+        idleTimeoutMs: config.limits.turnIdleMs,
+        onProgress: progress => this.#noteProgress(message, progress),
         tier,
       });
       const text = String(retry?.text ?? '').trim();

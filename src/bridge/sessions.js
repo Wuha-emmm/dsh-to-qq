@@ -598,6 +598,28 @@ export class DshDriver {
   async #runTurn(sessionId, request) {
     const requestId = `qq-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const abort = new AbortController();
+    // A turn is only "stuck" when nothing happens for a long time, not when it
+    // simply takes long: a slow conversion that keeps emitting tool calls is
+    // healthy. The watchdog watches activity, so waiting has no total cap.
+    const idleMs = Number(request.idleTimeoutMs) > 0 ? Number(request.idleTimeoutMs) : 300_000;
+    let lastActivity = Date.now();
+    let heartbeatAt = Date.now();
+    const watchdog = setInterval(() => {
+      const now = Date.now();
+      if (now - heartbeatAt >= 30_000) {
+        heartbeatAt = now;
+        request.onProgress?.({ idleMs: now - lastActivity });
+      }
+      if (now - lastActivity < idleMs) return;
+      this.log(`turn idle for ${Math.round((now - lastActivity) / 1000)}s in ${sessionId}; treating it as stuck`);
+      abort.abort();
+      try {
+        this.controller.cancel({ sessionId });
+      } catch {
+        // The turn may already be gone; nothing to cancel.
+      }
+      settle('hung');
+    }, 1000);
     const forwardAbort = () => abort.abort();
     request.signal?.addEventListener('abort', forwardAbort, { once: true });
 
@@ -638,6 +660,8 @@ export class DshDriver {
           }
           if (frame?.type !== 'event') continue;
           const event = frame.event;
+          // Any event — a step, a tool call, a token — means the turn is alive.
+          lastActivity = Date.now();
           const seq = Number(event?.seq ?? -1);
           const type = event?.type;
           // Remember every event type this run: it is how we learn the shape of
@@ -717,24 +741,13 @@ export class DshDriver {
     // so a reload before the reply can be repaired by the next instance.
     request.onPrompt?.({ sessionId, requestId });
 
-    let timer;
-    const outcome = await Promise.race([
-      completion,
-      new Promise(resolve => {
-        timer = setTimeout(() => resolve('timeout'), request.timeoutMs);
-      }),
-    ]);
-    clearTimeout(timer);
+    const outcome = await completion;
+    clearInterval(watchdog);
     abort.abort();
 
-    if (outcome === 'timeout') {
-      abort.abort();
-      try {
-        this.controller.cancel({ sessionId });
-      } catch {
-        // The turn may already be gone; nothing to cancel.
-      }
-      throw new Error('turn timed out');
+    if (outcome === 'hung') {
+      const waited = Math.round((Date.now() - lastActivity) / 1000);
+      throw new Error(`卡住了：${waited} 秒没有任何动作`);
     }
     if (outcome === 'aborted') throw new Error('cancelled');
     if (outcome instanceof Error) throw outcome;
