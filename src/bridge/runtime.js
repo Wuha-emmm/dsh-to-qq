@@ -288,15 +288,18 @@ export class Bridge {
    * @returns {string} Text, or '' when disabled or empty.
    */
   /**
-   * Local sticker preview as a `file:///` source.
+   * Picture source for a sticker.
    *
-   * Sending the 160 px preview with sticker flags keeps the bubble small; QQ
-   * renders the original URL at full size.
+   * The local file is a 160 px still preview, so a sticker that is animated in
+   * QQ arrives frozen. The catalog keeps the original expression URL, which is
+   * what QQ itself renders — prefer it and fall back to the preview only when
+   * the URL is missing.
    *
-   * @param {{ file?: string }} sticker Sticker.
-   * @returns {string} A file URL, or an empty string when no preview exists.
+   * @param {{ file?: string, url?: string }} sticker Sticker.
+   * @returns {string} A remote URL, a file URL, or '' when neither exists.
    */
   stickerImageSource(sticker) {
+    if (typeof sticker?.url === 'string' && /^https?:\/\//i.test(sticker.url)) return sticker.url;
     if (this.stickerDir === '' || typeof sticker?.file !== 'string' || sticker.file === '') return '';
     const path = join(this.stickerDir, sticker.file).replace(/\\/g, '/');
     return `file:///${path.replace(/^\/+/, '')}`;
