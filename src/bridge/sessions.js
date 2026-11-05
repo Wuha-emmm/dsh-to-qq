@@ -274,7 +274,15 @@ export class DshDriver {
     await this.map.load();
     const existing = this.map.get(scene);
     this.debug(`sessionFor ${scene} existing=${existing ?? 'none'}`);
-    if (typeof existing === 'string' && existing !== '') return existing;
+    if (typeof existing === 'string' && existing !== '') {
+      // An archived session still answers prompts, so the mapping would look
+      // healthy while every message landed in a session the sidebar hides.
+      // Rebind instead, and let the old one stay archived where it is.
+      if (!(await this.#isArchived(existing))) return existing;
+      this.log(`session ${existing} for ${scene} was archived; binding a fresh one`);
+      await this.map.remove(scene);
+      this.archivedCache = undefined;
+    }
     // Concurrent asks for the same unbound scene must share one creation:
     // otherwise a batch sync creates one session per request.
     const running = this.pending.get(scene);
@@ -334,6 +342,44 @@ export class DshDriver {
     await this.applyPermission?.(sessionId).catch(error => this.log(`permission preset failed: ${String(error?.message ?? error).slice(0, 120)}`));
     this.log(`bound ${scene} -> ${sessionId} (${tier})`);
     return sessionId;
+  }
+
+  /**
+   * Whether the host has archived a session.
+   *
+   * Every inbound message asks, and archiving is rare, so the answer is reused
+   * for a few seconds. A failed list is treated as "not archived" on purpose:
+   * falling back to the existing binding keeps chatting alive, while inventing
+   * a new session on every transient error would scatter the history.
+   *
+   * @param {string} sessionId Candidate session.
+   * @returns {Promise<boolean>} True when the host lists it as archived.
+   */
+  async #isArchived(sessionId) {
+    const now = Date.now();
+    if (this.archivedCache !== undefined && now - this.archivedAt < 5000) {
+      return this.archivedCache.has(sessionId);
+    }
+    const archived = new Set();
+    try {
+      const value = await this.controller.list({}, AbortSignal.timeout(8000));
+      const raw = Array.isArray(value)
+        ? value
+        : Array.isArray(value?.items) ? value.items
+          : Array.isArray(value?.sessions) ? value.sessions
+            : [];
+      for (const item of raw) {
+        if (item === null || typeof item !== 'object' || item.archived !== true) continue;
+        const id = item.id ?? item.sessionId;
+        if (typeof id === 'string') archived.add(id);
+      }
+    } catch (error) {
+      this.log(`session list failed: ${String(error?.message ?? error).slice(0, 120)}`);
+      return false;
+    }
+    this.archivedCache = archived;
+    this.archivedAt = now;
+    return archived.has(sessionId);
   }
 
   /**
