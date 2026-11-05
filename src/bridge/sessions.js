@@ -280,7 +280,9 @@ export class DshDriver {
       // The host also drops archived rows from `list`, so a binding missing
       // there is stale too. Rebind instead of writing into the void.
       const state = await this.#bindingState(existing);
-      if (state === 'live') return existing;
+      // 'unknown' means the host would not tell us; keep the binding rather
+      // than churn a new session on every transient list failure.
+      if (state === 'live' || state === 'unknown') return existing;
       this.log(`session ${existing} for ${scene} is ${state}; binding a fresh one`);
       await this.map.remove(scene);
       this.archivedCache = undefined;

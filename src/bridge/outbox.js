@@ -10,6 +10,51 @@
 /** Longest caption that reads as a label rather than a paragraph. */
 export const CAPTION_LIMIT = 30;
 
+/** Letters and digits only, so punctuation and spacing cannot hide a repeat. */
+const normalizeSpeech = text => String(text ?? '').toLowerCase().replace(/[\s\p{P}\p{S}]/gu, '');
+
+const bigrams = text => {
+  const counts = new Map();
+  for (let index = 0; index < text.length - 1; index += 1) {
+    const gram = text.slice(index, index + 2);
+    counts.set(gram, (counts.get(gram) ?? 0) + 1);
+  }
+  return counts;
+};
+
+/**
+ * Whether two texts say the same thing.
+ *
+ * A model that sends a message through the tool and then repeats it as its
+ * reply never types the second one exactly, so an equality check is useless.
+ * The metric is containment: how much of the shorter text also appears in the
+ * longer one, by character bigram. A paraphrase scores high, two unrelated
+ * replies score near zero.
+ *
+ * @param {string} left First text.
+ * @param {string} right Second text.
+ * @returns {boolean} True when only one of them should be sent.
+ */
+export function sameSpeech(left, right) {
+  const a = normalizeSpeech(left);
+  const b = normalizeSpeech(right);
+  if (a === '' || b === '') return false;
+  if (a === b) return true;
+  const shorter = a.length <= b.length ? a : b;
+  const longer = a.length <= b.length ? b : a;
+  if (shorter.length < 10) return false;
+  if (longer.includes(shorter)) return true;
+  const inner = bigrams(shorter);
+  const outer = bigrams(longer);
+  let shared = 0;
+  let total = 0;
+  for (const [gram, count] of inner) {
+    shared += Math.min(count, outer.get(gram) ?? 0);
+    total += count;
+  }
+  return total > 0 && shared / total >= 0.4;
+}
+
 /**
  * Normalize a caption. Captions are no longer cut — a long one is merged into
  * the reply instead, so nothing the model wrote disappears.
@@ -41,7 +86,8 @@ export function mergeText(reply, captions) {
     .map(caption => String(caption ?? '').trim())
     .filter(caption => caption !== '');
   if (body === '') return [...new Set(extras)].join('\n');
-  const fresh = [...new Set(extras)].filter(caption => !body.includes(caption));
+  const fresh = [...new Set(extras)]
+    .filter(caption => !body.includes(caption) && !sameSpeech(caption, body));
   return fresh.length === 0 ? body : `${body}\n${fresh.join('\n')}`;
 }
 
