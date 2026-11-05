@@ -1970,6 +1970,8 @@ const StickerBoard = () => {
       const scrollRef = React.useRef(null);
       const stickRef = React.useRef(true);
       const jumpRef = React.useRef(false);
+      // Where the reader actually was, so a poll never yanks them to the top.
+      const savedTopRef = React.useRef(0);
       const lastKeyRef = React.useRef('');
       const lastCountRef = React.useRef(0);
 
@@ -2049,18 +2051,30 @@ const StickerBoard = () => {
         };
       }, [active]);
 
-      // Land at the bottom when the thread opens; a new message never jumps.
+      // Land at the bottom when the thread opens; a new message never moves the reader.
       React.useEffect(() => {
         const element = scrollRef.current;
-        if (element === null || !jumpRef.current || messages.length === 0) return;
-        element.scrollTop = element.scrollHeight;
-        stickRef.current = true;
-        jumpRef.current = false;
+        if (element === null || messages.length === 0) return;
+        if (jumpRef.current) {
+          element.scrollTop = element.scrollHeight;
+          stickRef.current = true;
+          jumpRef.current = false;
+          savedTopRef.current = element.scrollTop;
+          return;
+        }
+        if (stickRef.current) {
+          element.scrollTop = element.scrollHeight;
+          savedTopRef.current = element.scrollTop;
+          return;
+        }
+        // Reading history: put the scrollbar back exactly where it was.
+        element.scrollTop = savedTopRef.current;
       }, [messages]);
 
       const onScroll = () => {
         const element = scrollRef.current;
         if (element === null) return;
+        savedTopRef.current = element.scrollTop;
         const near = element.scrollHeight - element.scrollTop - element.clientHeight < 64;
         stickRef.current = near;
         if (near) setPending(count => (count === 0 ? count : 0));
@@ -2072,6 +2086,7 @@ const StickerBoard = () => {
         stickRef.current = true;
         setPending(0);
         element.scrollTop = element.scrollHeight;
+        savedTopRef.current = element.scrollTop;
       };
 
       const toggleReasoning = index => {
