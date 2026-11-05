@@ -724,6 +724,23 @@ export class Bridge {
    * @returns {void}
    */
   /**
+   * Say something to a scene while no turn is running.
+   *
+   * A blocked tool only returns a refusal string to the model, so the person
+   * has to be told on QQ or the request sits unnoticed in a window nobody is
+   * looking at.
+   *
+   * @param {string} scene Scene key.
+   * @param {string} text Message body.
+   * @returns {Promise<boolean>} True when the scene had a message to reply to.
+   */
+  async notifyScene(scene, text) {
+    const last = this.lastInbound.get(scene);
+    if (last === undefined) return false;
+    await this.sendText(last, text);
+    return true;
+  }
+  /**
    * Turn stickers off or on for one scene when the message clearly asks for it.
    *
    * @param {import('./events.js').QQMessage} message Inbound message.

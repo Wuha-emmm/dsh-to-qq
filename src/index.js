@@ -556,6 +556,11 @@ export function apply(ctx) {
     approvals.request(info.scene, execution.name, execution.arguments);
     const preview = approvals.pendingOf(info.scene)?.preview ?? '';
     const detail = preview === '' ? '' : `（${preview}）`;
+    // The refusal only reaches the model, so announce it where the person can
+    // actually act on it: the scene that asked for the tool.
+    void bridge.notifyScene(info.scene, `需要你放行：${execution.name}${detail}。回 /yes 只批这一条，/yes! 放行这个工具 5 分钟，/全放行 一次全放。`).catch(error => {
+      log(`approval announce failed: ${String(error?.message ?? error).slice(0, 120)}`);
+    });
     return `这一步需要管理员确认：${execution.name}${detail}。请在 QQ 里回复 /yes（3 分钟内只批这一条；/yes! 放开该工具 5 分钟；/全放行 一次放开全部危险工具 5 分钟），然后再让我重试。`;
   }));
 
