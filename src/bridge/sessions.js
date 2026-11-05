@@ -385,6 +385,11 @@ export class DshDriver {
    */
   async #bindingState(sessionId) {
     const now = Date.now();
+    // The archive set is a registry property, not a session field: the session
+    // list never carries an archive flag, so this is the only authoritative
+    // answer and it costs no round trip.
+    const archived = this.workspaces?.archivedSessionIds;
+    if (Array.isArray(archived) && archived.includes(sessionId)) return 'archived';
     if (this.archivedCache !== undefined && now - this.archivedAt < 5000) {
       return this.archivedCache.get(sessionId) ?? 'live';
     }
