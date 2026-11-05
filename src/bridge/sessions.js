@@ -295,6 +295,32 @@ export class DshDriver {
   }
 
   /**
+   * Drop a binding whose session stopped being usable.
+   *
+   * An archived or vanished session still accepts a prompt and then finishes
+   * without a word: the turn looks healthy while the model was never there.
+   * The turn outcome is the only signal the driver gets, so the caller reports
+   * it here and the next message binds a fresh session.
+   *
+   * @param {string} scene Scene key.
+   * @param {string} [reason] Why the binding was dropped, for the log.
+   * @returns {Promise<boolean>} True when a binding was actually removed.
+   */
+  async invalidate(scene, reason = 'unknown') {
+    const existing = this.map.get(scene);
+    if (typeof existing !== 'string' || existing === '') return false;
+    this.log(`session ${existing} for ${scene} invalidated (${reason}); binding dropped`);
+    try {
+      await this.map.remove(scene);
+    } catch (error) {
+      this.log(`session map remove failed: ${String(error?.message ?? error).slice(0, 120)}`);
+      return false;
+    }
+    this.archivedCache = undefined;
+    return true;
+  }
+
+  /**
    * Create a session for an unbound scene, bind it, and prepare it for turns.
    *
    * @param {string} scene Scene key.

@@ -1581,7 +1581,20 @@ export class Bridge {
         void this.pet?.workStatus('success');
         return;
       }
-      const body = rawBody === '' ? '（这轮没有文本回复）' : rawBody;
+      if (rawBody === '') {
+        // No prose at all: an archived or deleted session answers a prompt and
+        // then ends silently. Report it and drop the binding so the next message
+        // opens a fresh session instead of replaying this empty turn forever.
+        this.log(`empty turn for ${message.scene}; dropping the session binding`);
+        try {
+          await this.driver?.invalidate?.(message.scene, 'empty-turn');
+        } catch (error) {
+          this.log(`invalidate failed: ${String(error?.message ?? error).slice(0, 120)}`);
+        }
+      }
+      const body = rawBody === ''
+        ? '（这条会话归档或不见了，我换了一条新的，你再说一次）'
+        : rawBody;
       const limitCandidates = [config.output.imageThreshold, lengthLimit]
         .map(value => Number(value) || 0)
         .filter(value => value > 0);
