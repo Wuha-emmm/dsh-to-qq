@@ -609,12 +609,31 @@ export class DshDriver {
     const startedAt = Date.now();
     let lastActivity = startedAt;
     let heartbeatAt = startedAt;
+    // A single long tool call is silent by nature: `tool/call` arrives, then
+    // nothing until `tool/result` minutes later. Counting that silence as death
+    // killed a healthy PDF build, so an open tool call keeps the turn alive —
+    // with its own ceiling, so a wedged tool still cannot hang forever.
+    const openCalls = new Map();
+    const toolCapMs = Number(request.toolTimeoutMs) > 0 ? Number(request.toolTimeoutMs) : 20 * 60_000;
     const watchdog = setInterval(() => {
       const now = Date.now();
       if (now - heartbeatAt >= 30_000) {
         heartbeatAt = now;
         request.onProgress?.({ idleMs: now - lastActivity });
       }
+      const oldestCall = openCalls.size === 0 ? 0 : Math.min(...openCalls.values());
+      if (oldestCall > 0 && now - oldestCall >= toolCapMs) {
+        this.log(`tool call open for ${Math.round((now - oldestCall) / 1000)}s in ${sessionId}; treating it as stuck`);
+        abort.abort();
+        try {
+          this.controller.cancel({ sessionId });
+        } catch {
+          // The turn may already be gone; nothing to cancel.
+        }
+        settle('hung');
+        return;
+      }
+      if (openCalls.size > 0) return;
       const spent = idleMs > 0 ? now - lastActivity : now - startedAt;
       const budget = idleMs > 0 ? idleMs : totalMs;
       if (spent < budget) return;
@@ -674,6 +693,9 @@ export class DshDriver {
           lastActivity = Date.now();
           const seq = Number(event?.seq ?? -1);
           const type = event?.type;
+          const callId = String(event?.data?.callId ?? event?.data?.id ?? '');
+          if (type === 'tool/call' && callId !== '') openCalls.set(callId, lastActivity);
+          if (type === 'tool/result' || type === 'tool/error') openCalls.delete(callId);
           // Remember every event type this run: it is how we learn the shape of
           // a tool-request event without guessing an API.
           if (typeof type === 'string') this.onEventType?.(type);
