@@ -11,6 +11,7 @@
 import { stat } from 'node:fs/promises';
 import { captionOf } from '../bridge/outbox.js';
 import { compressForUpload, disposeUploadCopy } from '../media/compress.js';
+import { toUploadSource, assertOneBotOk } from '../media/outbound-file.js';
 
 const textSegment = text => ({ type: 'text', data: { text } });
 
@@ -129,7 +130,9 @@ export function registerQqSendTool(ctx, options) {
         const upload = isGroup ? 'upload_group_file' : 'upload_private_file';
         const path = String(args.file);
         const name = path.split(/[\\/]/).pop() ?? 'file';
-        await bridge.client.call(upload, { ...baseParams, file: path, name }, { timeoutMs: 60_000 });
+        const source = await toUploadSource(path);
+        const result = await bridge.client.call(upload, { ...baseParams, file: source, name }, { timeoutMs: 120_000 });
+        assertOneBotOk(result, upload);
         sent.push(`file:${name}`);
         bridge.recordSceneOutbound?.(context.scene, `[文件] ${name}`, 'file');
       }

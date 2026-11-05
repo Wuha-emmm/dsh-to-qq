@@ -44,6 +44,7 @@ import { isEnvelopeDebris, shouldStaySilent } from './reply.js';
 import { appendFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { toUploadSource, assertOneBotOk } from '../media/outbound-file.js';
 
 /** How many recent message keys are remembered for de-duplication. */
 const SEEN_LIMIT = 800;
@@ -2674,7 +2675,9 @@ export class Bridge {
     for (const item of files) {
       const upload = isGroup ? 'upload_group_file' : 'upload_private_file';
       const name = item.file.split(/[\\/]/).pop() ?? 'file';
-      await client.call(upload, { ...params, file: item.file, name }, { timeoutMs: 60_000 });
+      const source = await toUploadSource(item.file);
+      const uploaded = await client.call(upload, { ...params, file: source, name }, { timeoutMs: 120_000 });
+      assertOneBotOk(uploaded, upload);
     }
     this.recordOutbound(message, text === '' ? '[图片]' : text, images.length > 0 ? 'image' : undefined, reasoning, sentId);
     this.#noteDelivery(message.scene, [text]);
