@@ -783,22 +783,54 @@ window.__ModuleLoader__.load({
       'archive.media': '把收到的图片/转发图存到本地',
     };
 
-    /** One settings row: label and hint on the left, control on the right. */
+    /**
+     * Number-list editor. The rows are stored as numbers, so a naive controlled
+     * input would re-parse on every keystroke and eat the comma (and any
+     * full-width characters) before a second value could be typed. Keep the raw
+     * text while typing and only parse it when the field loses focus.
+     */
+    const ListInput = props => {
+      const { value, kind, onChange } = props;
+      const asText = Array.isArray(value)
+        ? value.map(item => (typeof item === 'object' && item !== null ? item.qq : item)).join(', ')
+        : '';
+      const [draft, setDraft] = React.useState(asText);
+      const focused = React.useRef(false);
+
+      React.useEffect(() => {
+        if (!focused.current) setDraft(asText);
+      }, [asText]);
+
+      const commit = raw => {
+        const numbers = String(raw)
+          .split(/[,，、;；\s]+/)
+          .map(part => Number(part.trim()))
+          .filter(part => Number.isInteger(part) && part > 0);
+        onChange(kind === 'admin' ? numbers.map(qq => ({ qq, name: '', addedAt: Date.now() })) : numbers);
+      };
+
+      return h('input', {
+        type: 'text',
+        value: draft,
+        placeholder: props.placeholder ?? '',
+        onFocus: () => { focused.current = true; },
+        onChange: event => setDraft(event.target.value),
+        onBlur: () => { focused.current = false; commit(draft); },
+        onKeyDown: event => { if (event.key === 'Enter') commit(draft); },
+        style: { ...UI.input, width: '100%' },
+      });
+    };
+
     /** One settings row: label and hint on the left, control on the right. */
     const SettingsRow = props => {
       const { field, value, onChange, hint, first } = props;
       const common = {
-        value: field.type === 'list'
-          ? (Array.isArray(value) ? value.map(item => (typeof item === 'object' && item !== null ? item.qq : item)).join(', ') : '')
-          : field.type === 'checkbox' ? undefined : (value ?? ''),
+        value: field.type === 'checkbox' ? undefined : (value ?? ''),
         placeholder: field.placeholder ?? '',
         onChange: event => {
           const raw = event.target.value;
           if (field.type === 'number') onChange(Number(raw));
-          else if (field.type === 'list') {
-            const numbers = raw.split(',').map(part => Number(part.trim())).filter(part => Number.isInteger(part) && part > 0);
-            onChange(field.kind === 'admin' ? numbers.map(qq => ({ qq, name: '', addedAt: Date.now() })) : numbers);
-          } else onChange(raw);
+          else onChange(raw);
         },
         style: field.type === 'checkbox'
           ? { width: 17, height: 17, accentColor: 'var(--dsw-alias-brand-primary, #4d6bfe)', cursor: 'pointer' }
@@ -806,9 +838,11 @@ window.__ModuleLoader__.load({
       };
       const control = field.type === 'select'
         ? h(Select, { value: value ?? '', options: field.options, onChange })
-        : field.type === 'checkbox'
-          ? h('input', { ...common, type: 'checkbox', checked: value === true })
-          : h('input', { ...common, type: field.type === 'number' ? 'number' : 'text' });
+        : field.type === 'list'
+          ? h(ListInput, { value, kind: field.kind, onChange, placeholder: field.placeholder })
+          : field.type === 'checkbox'
+            ? h('input', { ...common, type: 'checkbox', checked: value === true })
+            : h('input', { ...common, type: field.type === 'number' ? 'number' : 'text' });
       return h('label', {
         style: {
           display: 'flex', alignItems: 'center', gap: 14, padding: '11px 0',
