@@ -24,6 +24,12 @@ export const HINTS = [
     text: () => '【只发正文】回复直接写给人看的话，不要输出 XML、DSML、antml: 这类标签或工具调用残片；工具用接口调，不要把调用过程写进正文。',
   },
   {
+    id: 'always-speak',
+    tiers: '*',
+    tools: [],
+    text: () => '【表情和图片只是附带】每轮回复必须有一句正文，表情包、图片、文件都不能代替说话；只发表情不写字等于什么都没说。',
+  },
+  {
     id: 'bilibili',
     tiers: '*',
     tools: ['bilibili_read'],

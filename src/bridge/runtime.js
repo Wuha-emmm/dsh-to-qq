@@ -2769,10 +2769,22 @@ export class Bridge {
     const text = mergeText(reply, items.map(item => item.caption));
     const images = items.filter(item => item.image !== '');
     const files = items.filter(item => item.file !== '');
+    const stickers = items.filter(item => item.sticker !== undefined);
     /** @type {Array<{ type: string, data: Record<string, unknown> }>} */
     const segments = [];
     for (const chunk of text === '' ? [] : chunkText(text, CHUNK_LIMIT)) {
       segments.push({ type: 'text', data: { text: chunk } });
+    }
+    // A sticker left the transport before the reply when the tool sent it
+    // directly; riding the queue keeps it behind the words of the same turn.
+    const customFaces = [];
+    for (const item of (text === '' ? [] : stickers.slice(0, 2))) {
+      const source = typeof this.stickerImageSource === 'function' ? this.stickerImageSource(item.sticker) : '';
+      if (source !== '') {
+        segments.push({ type: 'image', data: { file: source, sub_type: 1, summary: '[动画表情]' } });
+      } else if (typeof item.sticker?.md5 === 'string') {
+        customFaces.push(item.sticker.md5);
+      }
     }
     for (const item of images.slice(0, 4)) {
       segments.push({ type: 'image', data: { file: toImageSource(item.image) } });
@@ -2788,6 +2800,15 @@ export class Bridge {
     if (segments.length > 0) {
       const sent = await client.call(isGroup ? 'send_group_msg' : 'send_private_msg', { ...params, message: segments }, { timeoutMs: 30_000 });
       sentId = Number(sent?.message_id ?? sent?.data?.message_id ?? 0) || 0;
+    }
+    // Stickers without a local preview go through the custom-face action, which
+    // cannot ride inside a message body.
+    for (const md5 of customFaces) {
+      try {
+        await client.call('send_custom_face', { emoji_id: md5, ...params }, { timeoutMs: 20_000 });
+      } catch (error) {
+        this.log(`custom face failed for ${message.scene}: ${String(error?.message ?? error).slice(0, 100)}`);
+      }
     }
     // Extra pictures and files follow as their own messages.
     for (const item of images.slice(4)) {

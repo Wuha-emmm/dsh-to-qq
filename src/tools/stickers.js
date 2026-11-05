@@ -67,29 +67,15 @@ export function registerStickerTool(ctx, options) {
         throw new Error(`this conversation already got ${budget.sent} stickers in the last hour; send none now`);
       }
 
-      const isGroup = context.scene.startsWith('group:');
-      const target = Number(context.scene.slice(context.scene.indexOf(':') + 1));
-      // Prefer the small local preview with sticker flags: QQ renders a remote
-      // original at full size, so the bubble looked like a photo instead of a
-      // face. Fall back to the transport's own custom-face action when no
-      // preview was downloaded yet.
-      const source = typeof bridge.stickerImageSource === 'function' ? bridge.stickerImageSource(sticker) : '';
-      if (source !== '') {
-        await bridge.client.call(isGroup ? 'send_group_msg' : 'send_private_msg', {
-          ...(isGroup ? { group_id: target } : { user_id: target }),
-          message: [{ type: 'image', data: { file: source, sub_type: 1, summary: '[动画表情]' } }],
-        }, { timeoutMs: 20_000 });
-      } else {
-        await bridge.client.call('send_custom_face', {
-          emoji_id: sticker.md5,
-          ...(isGroup ? { group_id: target } : { user_id: target }),
-        }, { timeoutMs: 20_000 });
-      }
-
+      // Queue instead of sending straight away. A sticker used to leave the
+      // moment the tool ran, while the prose only went out when the turn ended —
+      // so a turn that produced no text left the other side with a face and no
+      // words. Both now travel on the same flush.
       bridge.noteStickerSent(context.scene, sticker);
-      options.log?.(`sticker sent to ${context.scene}: ${stickerHandle(sticker)} ${sticker.desc}`);
+      bridge.queueMedia(context.scene, { caption: '', image: '', file: '', sticker });
+      options.log?.(`sticker queued for ${context.scene}: ${stickerHandle(sticker)} ${sticker.desc}`);
       return {
-        report: `已发送表情包（${stickerHandle(sticker)} ${sticker.desc || '无描述'}）。这一轮不要再发表情。`,
+        report: `表情已排在这轮回复后面一起发（${stickerHandle(sticker)} ${sticker.desc || '无描述'}）。这一轮不要再发；正文照常写，没正文这条表情也不会单独出现。`,
         sticker: stickerHandle(sticker),
       };
     },
