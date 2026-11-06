@@ -59,7 +59,7 @@ export const inject = ['tools', 'sessionController', 'webServer'];
  * Keep this in step with package.json — it is what tells a running instance
  * apart from the build that was just installed.
  */
-const VERSION = '0.89.1';
+const VERSION = '0.89.2';
 
 /** Largest backup a browser upload may carry. */
 const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;

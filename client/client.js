@@ -2258,6 +2258,7 @@ const StickerBoard = () => {
       const [error, setError] = React.useState('');
       const [active, setActive] = React.useState(null);
       const [messages, setMessages] = React.useState([]);
+      const [loading, setLoading] = React.useState(false);
       const [open, setOpen] = React.useState({});
       const [translations, setTranslations] = React.useState({});
       const [query, setQuery] = React.useState('');
@@ -2304,10 +2305,14 @@ const StickerBoard = () => {
       }, [scenes, active]);
 
       // Switching conversations starts from a clean slate: no stale open blocks.
+      // The old thread is dropped immediately as well, so the new header never
+      // sits on top of the previous conversation's messages while the fetch runs.
       React.useEffect(() => {
         setOpen({});
         setTranslations({});
         setPending(0);
+        setMessages([]);
+        setLoading(active !== null);
         stickRef.current = true;
         jumpRef.current = true;
         lastKeyRef.current = '';
@@ -2317,6 +2322,7 @@ const StickerBoard = () => {
       React.useEffect(() => {
         if (active === null) {
           setMessages([]);
+          setLoading(false);
           return undefined;
         }
         let cancelled = false;
@@ -2336,8 +2342,12 @@ const StickerBoard = () => {
             lastCountRef.current = next.length;
             // Same rows: keep the old array so React skips the whole re-render.
             setMessages(previous => (JSON.stringify(previous) === JSON.stringify(next) ? previous : next));
+            setLoading(false);
           } catch (reason) {
-            if (!cancelled) setError(String(reason?.message ?? reason));
+            if (!cancelled) {
+              setLoading(false);
+              setError(String(reason?.message ?? reason));
+            }
           }
         };
         void load();
@@ -2425,9 +2435,10 @@ const StickerBoard = () => {
       // plain theme keeps its solid surfaces.
       const glass = (percent, extra = {}) => ({
         ...(hasBackground ? {
-          background: `color-mix(in srgb, var(--dsw-alias-bg-base, #fff) ${percent}%, transparent)`,
-          backdropFilter: 'blur(18px) saturate(1.15)',
-          WebkitBackdropFilter: 'blur(18px) saturate(1.15)',
+          // A backdrop-filter here (and on every bubble) made Chromium drop
+          // whole layers once the window went full screen. A denser translucent
+          // wash reads almost the same over a picture without the GPU cost.
+          background: `color-mix(in srgb, var(--dsw-alias-bg-base, #fff) ${Math.min(96, percent + 8)}%, transparent)`,
         } : {
           // Without a picture the panes still get a faint brand wash, so the
           // sidebar and header do not disappear into the thread background.
@@ -2647,7 +2658,7 @@ const StickerBoard = () => {
             background: out
               ? 'linear-gradient(135deg,#4d6bfe,#6b7cff)'
               : hasBackground
-                ? 'color-mix(in srgb, var(--dsw-alias-bg-base,#fff) 82%, transparent)'
+                ? 'color-mix(in srgb, var(--dsw-alias-bg-base,#fff) 90%, transparent)'
                 : 'rgba(128,128,128,.13)',
             color: out ? '#fff' : 'inherit',
             borderRadius: 15,
@@ -2655,8 +2666,6 @@ const StickerBoard = () => {
             borderTopLeftRadius: out ? 15 : 5,
             padding: '9px 12px',
             border: !out && hasBackground ? `1px solid ${PANEL_BORDER}` : 'none',
-            backdropFilter: !out && hasBackground ? 'blur(10px)' : undefined,
-            WebkitBackdropFilter: !out && hasBackground ? 'blur(10px)' : undefined,
             boxShadow: out ? '0 4px 12px rgba(40,60,180,.22)' : '0 1px 3px rgba(0,0,0,.06)',
             minWidth: 0,
           },
@@ -2750,9 +2759,9 @@ const StickerBoard = () => {
       state === null ? '读取中' : (online ? '已连接' : String(state.transport ?? '离线')))),
       h('div', { style: { fontSize: 10.5, opacity: 0.42, display: 'flex', gap: 8, minWidth: 0 } },
       h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-        active === null ? '选择一个会话' : `${kindOf(active) === 'group' ? '群聊' : '私聊'} · ${messages.length} 条消息`),
+        active === null ? '选择一个会话' : loading ? '读取中…' : `${kindOf(active) === 'group' ? '群聊' : '私聊'} · ${messages.length} 条消息`),
       error === '' ? null : h('span', { style: { color: '#c0392b', opacity: 1 } }, error))),
-      h('span', { style: { marginLeft: 'auto', fontSize: 10.5, opacity: 0.4, flex: '0 0 auto' } }, `${messages.length} 条`));
+      h('span', { style: { marginLeft: 'auto', fontSize: 10.5, opacity: 0.4, flex: '0 0 auto' } }, loading ? '' : `${messages.length} 条`));
 
       const thread = h('div', {
         onScroll,
@@ -2779,7 +2788,7 @@ const StickerBoard = () => {
               fontSize: 22, fontWeight: 700, boxShadow: '0 8px 20px rgba(77,107,254,.28)',
             },
           }, 'Q'),
-          h('span', { style: { fontSize: 12 } }, '这个会话还没有记录'))
+          h('span', { style: { fontSize: 12 } }, loading ? '正在读取会话…' : '这个会话还没有记录'))
         : bubbles);
 
       const pill = pending === 0 ? null : h('button', {
