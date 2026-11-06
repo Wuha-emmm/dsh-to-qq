@@ -2428,7 +2428,11 @@ const StickerBoard = () => {
           background: `color-mix(in srgb, var(--dsw-alias-bg-base, #fff) ${percent}%, transparent)`,
           backdropFilter: 'blur(18px) saturate(1.15)',
           WebkitBackdropFilter: 'blur(18px) saturate(1.15)',
-        } : {}),
+        } : {
+          // Without a picture the panes still get a faint brand wash, so the
+          // sidebar and header do not disappear into the thread background.
+          background: 'linear-gradient(180deg, color-mix(in srgb, var(--dsw-alias-brand-primary, #4d6bfe) 6%, transparent), transparent 210px)',
+        }),
         ...extra,
       });
 
@@ -2821,7 +2825,9 @@ const StickerBoard = () => {
           borderRadius: 18,
           border: `1px solid ${PANEL_BORDER}`,
           boxShadow: '0 18px 44px rgba(15,23,42,.12)',
-          background: 'var(--dsw-alias-bg-base, #fff)',
+          background: hasBackground
+            ? 'var(--dsw-alias-bg-base, #fff)'
+            : 'linear-gradient(150deg, color-mix(in srgb, var(--dsw-alias-brand-primary, #4d6bfe) 7%, var(--dsw-alias-bg-base, #fff)), var(--dsw-alias-bg-base, #fff) 48%, color-mix(in srgb, #7a5cf0 5%, var(--dsw-alias-bg-base, #fff)))',
           color: 'var(--dsw-alias-label-primary, #1c1f24)',
           fontSize: 13,
         },
