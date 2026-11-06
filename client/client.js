@@ -74,9 +74,6 @@ window.__ModuleLoader__.load({
       h('path', { d: 'M24 34q6-10 18-9', stroke: '#ffffff', strokeWidth: 3, fill: 'none', opacity: 0.55, strokeLinecap: 'round' }),
     );
 
-    /** Human label for a scene key. */
-    const sceneLabel = scene => (scene.startsWith('group:') ? `群 ${scene.slice(6)}` : `私聊 ${scene.slice(3)}`);
-
     /**
      * Locate the dsh-pet element in this page.
      *
@@ -263,7 +260,7 @@ window.__ModuleLoader__.load({
               flexDirection: 'column', gap: 2, fontSize: 12,
             },
           },
-          h('span', { style: { fontWeight: 600 } }, sceneLabel(row.scene)),
+          h('span', { style: { fontWeight: 600 } }, row.name || (String(row.scene).startsWith('group:') ? '群聊' : '私聊')),
           h('span', { style: { opacity: 0.6 } }, `${row.total} 条 · 最后 ${String(row.lastAt).slice(5, 16)}`)))),
         state !== null && state.scenes.length === 0
           ? h('div', { style: { opacity: 0.55, fontSize: 12 } }, '还没有消息记录，先在 QQ 里说句话吧。')
@@ -1954,6 +1951,59 @@ const StickerBoard = () => {
     const sceneAccent = scene => (String(scene).startsWith('group:') ? '#4d6bfe' : '#12a06a');
 
     /**
+     * Rounded scene portrait with a name initial underneath the image.
+     *
+     * The image fades in on load; a missing portrait (offline transport, pruned
+     * avatar) leaves the initial visible, so a row is never a broken-image icon.
+     *
+     * @param {{ scene: string, name?: string, size?: number }} props Scene, label, edge.
+     * @returns {any} Element tree.
+     */
+    const SceneAvatar = props => {
+      const accent = sceneAccent(props.scene);
+      const size = Number(props.size) || 34;
+      const initial = String(props.name ?? '').trim().slice(0, 1) || 'Q';
+      return h('span', {
+        'aria-hidden': 'true',
+        style: {
+          position: 'relative',
+          width: size,
+          height: size,
+          flex: `0 0 ${size}px`,
+          borderRadius: Math.round(size * 0.32),
+          overflow: 'hidden',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: `${accent}22`,
+          color: accent,
+          fontSize: Math.max(11, Math.round(size * 0.4)),
+          fontWeight: 600,
+          lineHeight: 1,
+          userSelect: 'none',
+        },
+      },
+      initial,
+      h('img', {
+        src: `/dsh-to-qq/api/avatar?scene=${encodeURIComponent(props.scene)}`,
+        alt: '',
+        loading: 'lazy',
+        draggable: false,
+        onLoad: event => { event.currentTarget.style.opacity = '1'; },
+        onError: event => { event.currentTarget.style.opacity = '0'; },
+        style: {
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          opacity: 0,
+          transition: 'opacity 140ms ease',
+        },
+      }));
+    };
+
+    /**
      * The QQ conversation as a main panel: conversations on the left, the chosen
      * thread on the right. Reasoning folds open per message and stays open while
      * you open another one; the list does not re-render when a poll returns the
@@ -2004,6 +2054,8 @@ const StickerBoard = () => {
         rows.sort((a, b) => String(b.lastAt ?? '').localeCompare(String(a.lastAt ?? '')));
         return rows;
       }, [state]);
+
+      const byScene = React.useMemo(() => new Map(scenes.map(row => [row.scene, row])), [scenes]);
 
       // Newest conversation first: the panel opens on the last thing that happened.
       React.useEffect(() => {
@@ -2109,20 +2161,22 @@ const StickerBoard = () => {
           .catch(reason => setTranslations(current => ({ ...current, [index]: { status: 'error', text: String(reason?.message ?? reason) } })));
       };
 
-      const label = scene => {
-        try {
-          return sceneLabel(scene);
-        } catch {
-          return String(scene);
-        }
+      const kindOf = scene => (String(scene).startsWith('group:') ? 'group' : 'dm');
+      const nameFor = scene => {
+        const row = byScene.get(scene);
+        const name = String(row?.name ?? '').trim();
+        if (name !== '') return name;
+        return kindOf(scene) === 'group' ? '群聊' : '私聊';
       };
 
-      const needle = query.trim();
-      const shown = needle === '' ? scenes : scenes.filter(row => label(row.scene).includes(needle));
+      const needle = query.trim().toLowerCase();
+      const shown = needle === ''
+        ? scenes
+        : scenes.filter(row => `${row.name ?? ''} ${row.scene}`.toLowerCase().includes(needle));
       const online = state?.transport === 'online';
 
-      // ── left: conversation list ──────────────────────────────────────
-      const rows = shown.map(row => {
+      // ── left: private chats, then groups ─────────────────────────────
+      const conversationButton = row => {
         const isActive = row.scene === active;
         return h('button', {
           key: row.scene,
@@ -2131,29 +2185,20 @@ const StickerBoard = () => {
           style: {
             textAlign: 'left',
             border: 'none',
-            borderRadius: 9,
-            padding: '9px 10px',
+            borderRadius: 10,
+            padding: '8px 9px',
             cursor: 'pointer',
             color: 'inherit',
             display: 'flex',
             alignItems: 'center',
-            gap: 9,
+            gap: 10,
             fontSize: 12,
             background: isActive ? 'rgba(77,107,254,.12)' : 'transparent',
             boxShadow: isActive ? 'inset 2px 0 0 #4d6bfe' : 'none',
             transition: 'background 120ms ease',
           },
         },
-        h('span', {
-          style: {
-            width: 8,
-            height: 8,
-            borderRadius: 4,
-            flex: '0 0 8px',
-            background: sceneAccent(row.scene),
-            opacity: isActive ? 1 : 0.5,
-          },
-        }),
+        h(SceneAvatar, { scene: row.scene, name: nameFor(row.scene), size: 34 }),
         h('span', { style: { display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 } },
         h('span', {
           style: {
@@ -2162,9 +2207,32 @@ const StickerBoard = () => {
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
           },
-        }, label(row.scene)),
+        }, nameFor(row.scene)),
         h('span', { style: { fontSize: 11, opacity: 0.5 } }, `${row.total} 条 · ${String(row.lastAt ?? '').slice(5, 16)}`)));
-      });
+      };
+
+      const section = (title, items) => (items.length === 0 ? null : h('div', {
+        key: title,
+        style: { display: 'flex', flexDirection: 'column', gap: 2 },
+      },
+      h('div', {
+        style: {
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '10px 9px 3px',
+          fontSize: 10.5,
+          fontWeight: 600,
+          letterSpacing: '.04em',
+          opacity: 0.45,
+        },
+      }, title, h('span', { style: { fontWeight: 400 } }, String(items.length))),
+      items.map(conversationButton)));
+
+      const rows = [
+        section('私聊', shown.filter(row => kindOf(row.scene) === 'dm')),
+        section('群聊', shown.filter(row => kindOf(row.scene) === 'group')),
+      ].filter(item => item !== null);
 
       const leftPane = h('div', {
         style: {
@@ -2322,8 +2390,26 @@ const StickerBoard = () => {
           minHeight: 30,
         },
       },
-      h('span', { style: { width: 8, height: 8, borderRadius: 4, background: active === null ? '#999' : sceneAccent(active) } }),
-      h('span', { style: { fontWeight: 600 } }, active === null ? '—' : label(active)),
+      active === null ? null : h(SceneAvatar, { scene: active, name: nameFor(active), size: 28 }),
+      h('span', {
+        style: {
+          fontWeight: 600,
+          minWidth: 0,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        },
+      }, active === null ? '—' : nameFor(active)),
+      active === null ? null : h('span', {
+        style: {
+          fontSize: 10.5,
+          padding: '1px 7px',
+          borderRadius: 20,
+          background: `${sceneAccent(active)}14`,
+          color: sceneAccent(active),
+          flex: '0 0 auto',
+        },
+      }, kindOf(active) === 'group' ? '群聊' : '私聊'),
       h('span', {
         style: {
           fontSize: 11,

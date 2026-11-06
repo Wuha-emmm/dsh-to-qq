@@ -216,6 +216,30 @@ class Archive {
   }
 
   /**
+   * Display name on the newest inbound message of one scene.
+   *
+   * Private chats only: the newest inbound sender is the peer, which lets the
+   * conversation list show a nickname before the transport answers. For groups
+   * this would be whichever member spoke last, so the caller must not use it.
+   *
+   * @param {string} scene Scene key.
+   * @returns {string} Name, or an empty string.
+   */
+  lastInboundName(scene) {
+    try {
+      const row = this.db.prepare(`
+        SELECT sender_name FROM messages
+        WHERE scene = ? AND direction = 'in'
+        ORDER BY time_unix DESC, id DESC
+        LIMIT 1
+      `).get(scene);
+      return typeof row?.sender_name === 'string' ? row.sender_name : '';
+    } catch {
+      return '';
+    }
+  }
+
+  /**
    * Read the newest messages of one scene, oldest first.
    *
    * @param {string} scene Scene key.

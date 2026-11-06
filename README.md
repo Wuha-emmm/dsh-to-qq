@@ -4,7 +4,7 @@
 
 > Bridge between QQ and DeepSeek Harness. Owner DMs get full local access; group mentions stay read-only.
 
-`Node ≥ 22` · `MIT` · 零 npm 运行时依赖 · 单测 381 条
+`Node ≥ 22` · `MIT` · 零 npm 运行时依赖 · 单测 400 条
 
 ---
 
@@ -50,6 +50,7 @@ file:///<你的路径>/dsh-to-qq/dist/dsh-to-qq-<版本>.tgz
 | **档案** | SQLite 记录谁在何时说了什么，可检索、按天清理 |
 | **日报** | 群日报出图，出图后不再补话 |
 | **会话** | 自动命名 `【私】名字` / `【群】群名`，统一归到项目文件夹 |
+| **对话列表** | Web 面板按「私聊 / 群聊」分组：头像 + 群名/昵称，不再只显示 QQ 号；名称与头像本地缓存，断线也记得 |
 | **上下文** | 记忆卡 / 表情清单 / 群规每会话只发一次，群窗口只补新消息；需要瘦身时用 `/重建`（带走最近 14 条，旧会话归档） |
 | **会话清理** | `/清理会话` 或设置页「档案 → QQ 会话清理」，先预览再归档未绑定的旧会话 |
 | **用量** | 设置页「用量」：每轮 token、缓存命中率、按峰谷价估算的费用 |
@@ -100,7 +101,7 @@ Host 半边负责接入、判权、上下文、记忆、档案与工具；Client
 ## 开发
 
 ```powershell
-npm test           # 381 条单测
+npm test           # 400 条单测
 npm run smoke      # 真调 apply()，抓前置引用/缺服务
 npm run rehearse   # 端到端：解码→判权→上下文→卡片渲染→鉴权
 npm run inventory  # 文件、工具、命令、路由、配置键盘点

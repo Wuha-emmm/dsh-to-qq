@@ -69,6 +69,8 @@ Host 插件能在进程内直接调用这些方法（已实测：`list`、`model
 | `config.json` | 设置页写、Host 监听热应用 |
 | `sessions.json` / `guests.json` | 场景 ↔ DSH 会话绑定 |
 | `memory.json` | 记忆卡 + 运行统计 + 印象冷却 |
+| `scene-names.json` | 会话列表的群名 / 昵称缓存（6 小时刷新一次） |
+| `avatars/` | 会话头像（按 `group-<id>.img` / `dm-<id>.img` 落盘，24 小时刷新） |
 | `archive.db` | SQLite（`node:sqlite`，WAL）：消息、媒体定位、检索 |
 | `media/` | 可选保存的图片与卡片底图 |
 

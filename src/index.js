@@ -45,6 +45,8 @@ import { registerMemoryCardTool } from './tools/card.js';
 import { registerDigestTool } from './tools/digest.js';
 import { registerQqAskTool } from './tools/ask.js';
 import { openArchive } from './archive/db.js';
+import { SceneNames, parseSceneKey } from './bridge/scene-names.js';
+import { AvatarCache } from './web/avatars.js';
 import { PetClient } from './pet/client.js';
 import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 import { rawSendRefusal } from './policy/raw-send.js';
@@ -57,7 +59,7 @@ export const inject = ['tools', 'sessionController', 'webServer'];
  * Keep this in step with package.json — it is what tells a running instance
  * apart from the build that was just installed.
  */
-const VERSION = '0.87.1';
+const VERSION = '0.88.0';
 
 /** Largest backup a browser upload may carry. */
 const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
@@ -156,6 +158,8 @@ export function apply(ctx) {
   const guestStore = new SessionMap(join(stateDir, 'guests.json'));
   const guests = new GuestRegistry();
   const memory = new MemoryStore(join(stateDir, 'memory.json'));
+  const sceneNames = new SceneNames(join(stateDir, 'scene-names.json'), { log });
+  const avatars = new AvatarCache(join(stateDir, 'avatars'), { log });
   const stickerDir = join(stateDir, 'media', 'stickers');
   const stickers = new StickerStore(join(stateDir, 'stickers.json'), stickerDir);
   /** Last image-admission failure, surfaced by `qq_status` for diagnosis. */
@@ -640,6 +644,7 @@ export function apply(ctx) {
   };
   applyMemoryPrivacy();
   void memory.load().catch(error => log(`memory load failed: ${error.message}`));
+  void sceneNames.load();
   void stickers.load().catch(error => log(`sticker load failed: ${error.message}`));
   void bridge.loadRebuildState().catch(error => log(`rebuild marks load failed: ${error.message}`));
   void readFile(join(stateDir, 'quota.json'), 'utf8').then(text => {
@@ -867,9 +872,50 @@ export function apply(ctx) {
         const snapshot = bridge.snapshot();
         const config = store.get();
         const bindings = map.all();
-        const scenes = (bridge.archive?.scenes() ?? []).map(row => ({
+        const rows = bridge.archive?.scenes() ?? [];
+        /** @type {Map<string, string>} */
+        const names = new Map();
+        for (const row of rows) {
+          let name = sceneNames.get(row.scene);
+          if (name === '') {
+            // A private chat's newest inbound sender is the peer, so the archive
+            // can name the row before the transport answers. Group rows must not
+            // use this: their sender is whichever member spoke last.
+            const seed = row.kind === 'dm'
+              ? bridge.archive?.lastInboundName?.(row.scene) ?? ''
+              : bridge.groupNames?.get?.(Number(row.scene.slice(6))) ?? '';
+            if (String(seed).trim() !== '') {
+              sceneNames.seed(row.scene, seed);
+              name = sceneNames.get(row.scene);
+            }
+          }
+          names.set(row.scene, name);
+        }
+        // The first paint after a restart should carry real names, not
+        // placeholders. The transport is local, so wait briefly; a dead
+        // transport loses the race and the list falls back to 群聊/私聊.
+        const missing = rows.filter(row => (names.get(row.scene) ?? '') === '');
+        const lookups = [];
+        for (const row of rows) {
+          if ((names.get(row.scene) ?? '') === '' || sceneNames.stale(row.scene)) {
+            lookups.push(sceneNames.ensure(row.scene, { client: bridge.client, memory }));
+          }
+        }
+        if (missing.length > 0 && lookups.length > 0) {
+          await Promise.race([
+            Promise.all(lookups),
+            new Promise(resolve => {
+              const timer = setTimeout(resolve, 1500);
+              timer.unref?.();
+            }),
+          ]);
+          for (const row of missing) names.set(row.scene, sceneNames.get(row.scene));
+        }
+        const scenes = rows.map(row => ({
           scene: row.scene,
           kind: row.kind,
+          name: names.get(row.scene) ?? '',
+          avatar: `/dsh-to-qq/api/avatar?scene=${encodeURIComponent(row.scene)}`,
           lastAt: row.last_bj,
           total: row.total,
           session: bindings[row.scene] ?? null,
@@ -969,6 +1015,21 @@ export function apply(ctx) {
         const type = detectMediaType(new Uint8Array(bytes), 'image/png');
         res.writeHead(200, { 'content-type': type, 'cache-control': 'public, max-age=86400' });
         res.end(bytes);
+        return;
+      }
+      if (url.pathname === '/dsh-to-qq/api/avatar') {
+        const scene = String(url.searchParams.get('scene') ?? '');
+        if (parseSceneKey(scene) === undefined) {
+          send(400, { error: 'bad scene' });
+          return;
+        }
+        const avatar = await avatars.get(scene);
+        if (avatar === undefined) {
+          send(404, { error: 'avatar unavailable' });
+          return;
+        }
+        res.writeHead(200, { 'content-type': avatar.type, 'cache-control': 'public, max-age=21600' });
+        res.end(Buffer.from(avatar.bytes));
         return;
       }
       if (url.pathname === '/dsh-to-qq/api/stickers/update' && req.method === 'POST') {
@@ -1402,6 +1463,7 @@ export function apply(ctx) {
       { kind: 'exact', path: '/dsh-to-qq/api/stickers' },
       { kind: 'exact', path: '/dsh-to-qq/api/stickers/preview' },
       { kind: 'exact', path: '/dsh-to-qq/api/stickers/update' },
+      { kind: 'exact', path: '/dsh-to-qq/api/avatar' },
     ];
     const disposers = [];
     const failures = [];
