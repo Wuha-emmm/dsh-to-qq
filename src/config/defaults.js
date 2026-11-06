@@ -207,8 +207,19 @@ export function defaults() {
       /** dsh-pet instance id. */
       petId: 'main',
     },
+    appearance: {
+      /** '', `preset:<id>`, or the uploaded panel background URL. */
+      background: '',
+      /** How much of the theme background is laid over the picture, in percent. */
+      backgroundDim: 55,
+      /** Gaussian blur applied to the picture, in pixels. */
+      backgroundBlur: 0,
+    },
   };
 }
+
+/** Values the panel may store for the conversation background. */
+const BACKGROUND_PATTERN = /^(?:|preset:[a-z0-9-]{1,24}|\/dsh-to-qq\/api\/panel\/background\?v=\d{1,16})$/;
 
 /** Ranges enforced by `normalize`; every entry is `[min, max]`. */
 export const RANGES = {
@@ -255,6 +266,8 @@ export const RANGES = {
   'output.replyCharsOwner': [0, 4000],
   'output.replyCharsGroup': [0, 4000],
   'models.offPeakDiscount': [0, 1],
+  'appearance.backgroundDim': [0, 95],
+  'appearance.backgroundBlur': [0, 24],
 };
 
 /**
@@ -283,6 +296,9 @@ export function mergeConfig(stored) {
  * @returns {QQConfig} The same object, corrected in place.
  */
 export function normalize(config) {
+  if (config.appearance === null || typeof config.appearance !== 'object' || Array.isArray(config.appearance)) {
+    config.appearance = defaults().appearance;
+  }
   for (const [path, [min, max]] of Object.entries(RANGES)) {
     const [section, key] = path.split('.');
     const value = Number(config[section][key]);
@@ -303,6 +319,12 @@ export function normalize(config) {
   for (const [path, allowed] of Object.entries(enums)) {
     const [section, key] = path.split('.');
     if (!allowed.includes(config[section][key])) config[section][key] = allowed[0];
+  }
+
+  // The background ends up inside a CSS background-image, so only the three
+  // shapes this plugin produces are allowed; anything else is discarded.
+  if (typeof config.appearance.background !== 'string' || !BACKGROUND_PATTERN.test(config.appearance.background)) {
+    config.appearance.background = '';
   }
 
   if (!Array.isArray(config.access.admins)) config.access.admins = [];

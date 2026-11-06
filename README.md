@@ -4,7 +4,7 @@
 
 > Bridge between QQ and DeepSeek Harness. Owner DMs get full local access; group mentions stay read-only.
 
-`Node ≥ 22` · `MIT` · 零 npm 运行时依赖 · 单测 399 条
+`Node ≥ 22` · `MIT` · 零 npm 运行时依赖 · 单测 400 条
 
 ---
 
@@ -51,12 +51,13 @@ file:///<你的路径>/dsh-to-qq/dist/dsh-to-qq-<版本>.tgz
 | **日报** | 群日报出图，出图后不再补话 |
 | **会话** | 自动命名 `【私】名字` / `【群】群名`，统一归到项目文件夹 |
 | **对话列表** | Web 面板按「私聊 / 群聊」分组：头像 + 群名/昵称，不再只显示 QQ 号；名称与头像本地缓存，断线也记得 |
+| **外观** | 设置 →「外观」：上传背景图（≤ 8 MB）或选预设，遮罩与模糊可调；只影响本机面板 |
 | **上下文** | 记忆卡 / 表情清单 / 群规每会话只发一次，群窗口只补新消息；需要瘦身时用 `/重建`（带走最近 14 条，旧会话归档） |
 | **会话清理** | `/清理会话` 或设置页「档案 → QQ 会话清理」，先预览再归档未绑定的旧会话 |
 | **用量** | 设置页「用量」：每轮 token、缓存命中率、按峰谷价估算的费用 |
 | **回复长度** | 可设上限（默认 250 字），超长回复自动转成图片 |
 
-设置页 9 个页签：连接 / 权限 / 对话 / 记忆 / 表情 / 模型 / 档案 / 登录 / 用量。
+设置页 10 个页签：连接 / 权限 / 对话 / 记忆 / 外观 / 表情 / 模型 / 档案 / 登录 / 用量。
 
 ## 权限模型
 
@@ -90,7 +91,7 @@ Host 半边负责接入、判权、上下文、记忆、档案与工具；Client
 | [表情包库](docs/stickers.md) | 同步、识图、手改、免打扰 |
 | [权限模型](docs/permission-model.md) | 四档权限、好友/陌生人、工具矩阵 |
 | [架构](docs/architecture.md) | 模块划分、数据流、上下文与媒体管线 |
-| [设置页规格](docs/settings-spec.md) | 九个页签各自管什么 |
+| [设置页规格](docs/settings-spec.md) | 十个页签各自管什么 |
 | [安全现状](docs/audit.md) | 信任边界与已知风险 |
 | [排障](docs/troubleshooting.md) | 常见故障与日志位置 |
 | [SnowLuma 备忘](docs/snowluma.md) | 端口、双 token、状态码 |
@@ -101,7 +102,7 @@ Host 半边负责接入、判权、上下文、记忆、档案与工具；Client
 ## 开发
 
 ```powershell
-npm test           # 399 条单测
+npm test           # 400 条单测
 npm run smoke      # 真调 apply()，抓前置引用/缺服务
 npm run rehearse   # 端到端：解码→判权→上下文→卡片渲染→鉴权
 npm run inventory  # 文件、工具、命令、路由、配置键盘点

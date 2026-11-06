@@ -59,10 +59,31 @@ export const inject = ['tools', 'sessionController', 'webServer'];
  * Keep this in step with package.json — it is what tells a running instance
  * apart from the build that was just installed.
  */
-const VERSION = '0.88.0';
+const VERSION = '0.89.0';
 
 /** Largest backup a browser upload may carry. */
 const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
+
+/** Largest picture accepted as the conversation background. */
+const MAX_BACKGROUND_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Identify an image by its magic bytes.
+ *
+ * `detectMediaType` falls back to `image/png`, which is right for a QQ segment
+ * with a declared type but wrong for a raw upload: a text file must not become
+ * a background just because the browser labelled it.
+ *
+ * @param {Uint8Array} bytes Leading bytes of the file.
+ * @returns {string} A supported media type, or `''`.
+ */
+function sniffImage(bytes) {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'image/png';
+  if (bytes.length >= 4 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return 'image/gif';
+  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[8] === 0x57 && bytes[9] === 0x45) return 'image/webp';
+  return '';
+}
 
 /**
  * Accept a backup file name, or return an empty string.
@@ -929,6 +950,7 @@ export function apply(ctx) {
           petClicks: menuClicks,
           petReady,
           scenes,
+          appearance: config.appearance,
         });
         return;
       }
@@ -1015,6 +1037,50 @@ export function apply(ctx) {
         const type = detectMediaType(new Uint8Array(bytes), 'image/png');
         res.writeHead(200, { 'content-type': type, 'cache-control': 'public, max-age=86400' });
         res.end(bytes);
+        return;
+      }
+      if (url.pathname === '/dsh-to-qq/api/panel/background' && req.method === 'GET') {
+        const bytes = await readFile(join(stateDir, 'panel-background.img')).catch(() => undefined);
+        const type = bytes === undefined ? '' : sniffImage(bytes);
+        if (bytes === undefined || bytes.length === 0 || type === '') {
+          send(404, { error: 'no background' });
+          return;
+        }
+        res.writeHead(200, { 'content-type': type, 'cache-control': 'public, max-age=86400' });
+        res.end(bytes);
+        return;
+      }
+      if (url.pathname === '/dsh-to-qq/api/panel/background' && req.method === 'POST') {
+        const temp = join(stateDir, 'panel-background.tmp');
+        await mkdir(stateDir, { recursive: true });
+        let bytes = 0;
+        try {
+          bytes = await receiveFile(req, temp, MAX_BACKGROUND_BYTES);
+        } catch (error) {
+          await rm(temp, { force: true }).catch(() => {});
+          send(500, { error: String(error?.message ?? error) });
+          return;
+        }
+        if (bytes === 0) {
+          await rm(temp, { force: true }).catch(() => {});
+          send(400, { error: '图片为空或超过 8 MB' });
+          return;
+        }
+        const head = await readFile(temp).catch(() => undefined);
+        const type = head === undefined ? '' : sniffImage(head);
+        if (type === '') {
+          await rm(temp, { force: true }).catch(() => {});
+          send(400, { error: '只支持 JPG / PNG / WebP / GIF' });
+          return;
+        }
+        try {
+          await rename(temp, join(stateDir, 'panel-background.img'));
+        } catch (error) {
+          await rm(temp, { force: true }).catch(() => {});
+          send(500, { error: `保存背景失败：${String(error?.message ?? error)}` });
+          return;
+        }
+        send(200, { ok: true, url: `/dsh-to-qq/api/panel/background?v=${Date.now()}`, bytes, type });
         return;
       }
       if (url.pathname === '/dsh-to-qq/api/avatar') {
@@ -1464,6 +1530,7 @@ export function apply(ctx) {
       { kind: 'exact', path: '/dsh-to-qq/api/stickers/preview' },
       { kind: 'exact', path: '/dsh-to-qq/api/stickers/update' },
       { kind: 'exact', path: '/dsh-to-qq/api/avatar' },
+      { kind: 'exact', path: '/dsh-to-qq/api/panel/background' },
     ];
     const disposers = [];
     const failures = [];

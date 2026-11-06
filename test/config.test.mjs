@@ -4,7 +4,7 @@ import { defaults, mergeConfig, normalize, RANGES } from '../src/config/defaults
 
 test('defaults expose every documented section', () => {
   const config = defaults();
-  for (const section of ['connection', 'access', 'models', 'conversation', 'memory', 'limits', 'output', 'archive', 'safety', 'ui']) {
+  for (const section of ['connection', 'access', 'models', 'conversation', 'memory', 'limits', 'output', 'archive', 'safety', 'ui', 'appearance']) {
     assert.ok(config[section] && typeof config[section] === 'object', `missing section ${section}`);
   }
   assert.equal(config.conversation.groupHistory > 0, true);
@@ -63,4 +63,22 @@ test('the approval window is configurable and stays inside sane bounds', () => {
   assert.equal(base.safety.toolGrantMinutes, 15);
   assert.equal(normalize({ ...base, safety: { ...base.safety, toolGrantMinutes: 30 } }).safety.toolGrantMinutes, 30);
   assert.equal(normalize({ ...base, safety: { ...base.safety, toolGrantMinutes: 999 } }).safety.toolGrantMinutes, 120);
+});
+
+test('appearance background only keeps the forms the panel generates', () => {
+  const hostile = mergeConfig({
+    appearance: { background: 'javascript:alert(1)', backgroundDim: 500, backgroundBlur: -4 },
+  });
+  assert.equal(hostile.appearance.background, '');
+  assert.equal(hostile.appearance.backgroundDim, 95);
+  assert.equal(hostile.appearance.backgroundBlur, 0);
+
+  const preset = mergeConfig({ appearance: { background: 'preset:dusk', backgroundDim: 30, backgroundBlur: 6 } });
+  assert.equal(preset.appearance.background, 'preset:dusk');
+  assert.equal(preset.appearance.backgroundDim, 30);
+  assert.equal(preset.appearance.backgroundBlur, 6);
+
+  const uploaded = '/dsh-to-qq/api/panel/background?v=1762300000000';
+  assert.equal(mergeConfig({ appearance: { background: uploaded } }).appearance.background, uploaded);
+  assert.equal(mergeConfig({ appearance: { background: '/dsh-to-qq/api/panel/background?x=1' } }).appearance.background, '');
 });

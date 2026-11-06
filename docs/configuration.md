@@ -108,9 +108,11 @@
 | `concurrency` | `4` | `1 ~ 5` | 同时进行的回答数 |
 | `queueMax` | `10` | `1 ~ 50` | 排队上限，超过直接拒绝 |
 | `turnTimeoutMs` | `180000` | `60000 ~ 3600000` | 单轮回答超时，超时后释放并发槽 |
+| `turnIdleMs` | `300000` | `30000 ~ 3600000` |  |
 | `replyDelayMs` | `2000` | `0 ~ 30000` | 回答前的基础延迟 |
 | `jitterMs` | `1500` | `0 ~ 10000` | 在基础延迟上叠加的随机抖动 |
 | `maxDelayMs` | `15000` | `0 ~ 120000` | 延迟上限 |
+| `batchMaxWaitMs` | `7000` | `0 ~ 120000` |  |
 | `overLimit` | `refuse` | — | 超限行为：refuse / silent / queue |
 
 ## output
@@ -187,3 +189,11 @@
 |---|---|---|---|
 | `pet` | `true` | — | 与 dsh-pet 联动（菜单、气泡、工作状态） |
 | `petId` | `main` | — | dsh-pet 实例 id |
+
+## appearance
+
+| 键 | 默认值 | 范围 | 说明 |
+|---|---|---|---|
+| `background` | `""`（空） | — |  |
+| `backgroundDim` | `55` | `0 ~ 95` |  |
+| `backgroundBlur` | `0` | `0 ~ 24` |  |

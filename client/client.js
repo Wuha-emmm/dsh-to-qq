@@ -15,12 +15,30 @@ window.__ModuleLoader__.load({
     const React = require('react');
     const h = React.createElement;
 
-    // One tiny stylesheet for the status dot pulse.
-    if (typeof document !== 'undefined' && document.getElementById('dsh-to-qq-style') === null) {
-      const sheet = document.createElement('style');
-      sheet.id = 'dsh-to-qq-style';
-      sheet.textContent = '@keyframes dshToQqPulse{0%,100%{opacity:1}50%{opacity:.3}}';
-      document.head.appendChild(sheet);
+    // Shared stylesheet: the status pulse plus the conversation polish. It is
+    // rewritten on module load so a hot-reloaded client picks up CSS changes
+    // without needing a full page reload.
+    const STYLE_TEXT = [
+      '@keyframes dshToQqPulse{0%,100%{opacity:1}50%{opacity:.3}}',
+      '.dsh-to-qq-row{background:transparent;transition:background 120ms ease,box-shadow 120ms ease}',
+      '.dsh-to-qq-row:hover{background:color-mix(in srgb,var(--dsw-alias-label-primary,#111) 6%,transparent)}',
+      '.dsh-to-qq-row[data-active="true"]{background:linear-gradient(90deg,color-mix(in srgb,#4d6bfe 20%,transparent),color-mix(in srgb,#4d6bfe 6%,transparent));box-shadow:inset 2px 0 0 #4d6bfe}',
+      '.dsh-to-qq-search:focus{border-color:color-mix(in srgb,#4d6bfe 55%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,#4d6bfe 16%,transparent)}',
+      '.dsh-to-qq-scroll{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--dsw-alias-label-primary,#111) 20%,transparent) transparent}',
+      '.dsh-to-qq-scroll::-webkit-scrollbar{width:8px}',
+      '.dsh-to-qq-scroll::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--dsw-alias-label-primary,#111) 18%,transparent);border-radius:999px;border:2px solid transparent;background-clip:padding-box}',
+      '.dsh-to-qq-scroll::-webkit-scrollbar-track{background:transparent}',
+      '.dsh-to-qq-chip{transition:transform 120ms ease,box-shadow 120ms ease,border-color 120ms ease}',
+      '.dsh-to-qq-chip:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(15,23,42,.10)}',
+    ].join('\n');
+    if (typeof document !== 'undefined') {
+      let sheet = document.getElementById('dsh-to-qq-style');
+      if (sheet === null) {
+        sheet = document.createElement('style');
+        sheet.id = 'dsh-to-qq-style';
+        document.head.appendChild(sheet);
+      }
+      sheet.textContent = STYLE_TEXT;
     }
 
     /** Overlay id used for slot registration and CSS scoping. */
@@ -109,6 +127,19 @@ window.__ModuleLoader__.load({
         credentials: 'same-origin',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
+      return data;
+    };
+
+    /** Post a File/Blob as the raw request body, keeping its image type. */
+    const postBinary = async (path, body) => {
+      const response = await fetch(path, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': body.type || 'application/octet-stream' },
+        body,
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
@@ -631,6 +662,7 @@ window.__ModuleLoader__.load({
     /** Settings tabs: the field groups plus the model and archive panels. */
     const SETTINGS_TABS = [
       ...SETTINGS_GROUPS.map(group => ({ id: group.title, title: group.title, group })),
+      { id: '外观', title: '外观', custom: 'appearance' },
       { id: '表情', title: '表情', custom: 'stickers' },
       { id: '模型', title: '模型', custom: 'models' },
       { id: '登录', title: '登录', custom: 'accounts' },
@@ -668,6 +700,28 @@ window.__ModuleLoader__.load({
         border: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.25))',
         background: 'transparent', color: 'var(--dsw-alias-label-primary, inherit)',
       },
+    };
+
+    /** Ready-made panel backgrounds; ids are stored as `preset:<id>`. */
+    const BACKGROUND_PRESETS = [
+      { id: 'mist', label: '晨雾', css: 'linear-gradient(135deg,#dbeafe 0%,#ede9fe 50%,#fce7f3 100%)' },
+      { id: 'dusk', label: '暮色', css: 'linear-gradient(135deg,#0f172a 0%,#312e81 50%,#831843 100%)' },
+      { id: 'sakura', label: '樱粉', css: 'linear-gradient(135deg,#fff1f2 0%,#fce7f3 50%,#ede9fe 100%)' },
+      { id: 'ocean', label: '深海', css: 'linear-gradient(135deg,#042f2e 0%,#0f766e 50%,#1e3a8a 100%)' },
+    ];
+    const PRESET_BY_ID = new Map(BACKGROUND_PRESETS.map(preset => [preset.id, preset]));
+
+    /** Turn a stored background value into CSS, or `{}` when it is empty. */
+    const backgroundStyle = value => {
+      const text = String(value ?? '');
+      if (text.startsWith('preset:')) {
+        const preset = PRESET_BY_ID.get(text.slice(7));
+        return preset === undefined ? {} : { backgroundImage: preset.css };
+      }
+      if (/^\/dsh-to-qq\/api\/panel\/background\?v=\d{1,16}$/.test(text)) {
+        return { backgroundImage: `url("${text}")` };
+      }
+      return {};
     };
 
     /** Themed dropdown: native <select> popups ignore the app theme. */
@@ -1672,6 +1726,188 @@ const StickerBoard = () => {
       },
     });
 
+    /** Background picker: presets, an uploaded picture, and readability controls. */
+    const AppearancePanel = props => {
+      const { config, setConfig, setStatus } = props;
+      const [uploading, setUploading] = React.useState(false);
+      const [uploadError, setUploadError] = React.useState('');
+      const fileRef = React.useRef(null);
+      const appearance = config.appearance ?? {};
+      const background = String(appearance.background ?? '');
+      const dim = Math.max(0, Math.min(95, Number(appearance.backgroundDim) || 0));
+      const blur = Math.max(0, Math.min(24, Number(appearance.backgroundBlur) || 0));
+      const previewStyle = backgroundStyle(background);
+      const hasPreview = previewStyle.backgroundImage !== undefined;
+      const selectedChip = id => background === `preset:${id}`;
+
+      const update = (key, value) => {
+        setConfig(current => {
+          const base = current.appearance === undefined
+            ? { ...current, appearance: { background: '', backgroundDim: 55, backgroundBlur: 0 } }
+            : current;
+          return setPath(base, `appearance.${key}`, value);
+        });
+        setStatus({ kind: 'dirty', text: '有未保存的修改' });
+      };
+
+      const upload = async event => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (file === undefined) return;
+        if (!String(file.type).startsWith('image/')) {
+          setUploadError('请选择图片文件');
+          return;
+        }
+        if (file.size > 8 * 1024 * 1024) {
+          setUploadError('图片不能超过 8 MB');
+          return;
+        }
+        setUploadError('');
+        setUploading(true);
+        try {
+          const data = await postBinary('/dsh-to-qq/api/panel/background', file);
+          if (typeof data.url !== 'string' || data.url === '') throw new Error('服务端没有返回图片地址');
+          update('background', data.url);
+        } catch (reason) {
+          setUploadError(`上传失败：${String(reason?.message ?? reason)}`);
+        } finally {
+          setUploading(false);
+        }
+      };
+
+      return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 640 } },
+        h('div', { style: UI.card },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0 8px' } },
+            h('span', { style: { fontSize: 12.5, fontWeight: 600 } }, '对话背景'),
+            h('span', { style: { ...UI.muted, flex: 1 } }, '只影响本机面板，上传后保存才会生效')),
+          h('div', {
+            style: {
+              position: 'relative', height: 190, borderRadius: 14, overflow: 'hidden',
+              border: `1px solid ${PANEL_BORDER}`,
+              background: 'linear-gradient(135deg,#eef2ff,#fae8ff 55%,#e0f2fe)',
+            },
+          },
+          hasPreview ? h('div', {
+            style: {
+              position: 'absolute', inset: -8, ...previewStyle,
+              backgroundSize: 'cover', backgroundPosition: 'center',
+              filter: blur > 0 ? `blur(${blur}px)` : 'none',
+              transform: blur > 0 ? 'scale(1.06)' : 'none',
+            },
+          }) : null,
+          hasPreview ? h('div', {
+            style: {
+              position: 'absolute', inset: 0,
+              background: `color-mix(in srgb, var(--dsw-alias-bg-base, #fff) ${dim}%, transparent)`,
+            },
+          }) : null,
+          h('div', {
+            style: {
+              position: 'relative', zIndex: 1, height: '100%', boxSizing: 'border-box',
+              padding: 14, display: 'flex', flexDirection: 'column', gap: 8,
+              color: 'var(--dsw-alias-label-primary, #1c1f24)',
+            },
+          },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+            h('span', {
+              style: {
+                width: 28, height: 28, borderRadius: 10, display: 'inline-flex',
+                alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700,
+                background: 'linear-gradient(135deg,#4d6bfe,#7a5cf0)', color: '#fff',
+              },
+            }, 'Q'),
+            h('span', { style: { fontSize: 12, fontWeight: 600 } }, '聊天预览'),
+            h('span', {
+              style: {
+                marginLeft: 'auto', fontSize: 10, opacity: 0.55, padding: '2px 7px', borderRadius: 20,
+                background: 'color-mix(in srgb, var(--dsw-alias-bg-base,#fff) 55%, transparent)',
+              },
+            }, '背景预览')),
+          h('div', { style: { marginTop: 'auto', display: 'flex', gap: 8, alignItems: 'flex-end' } },
+            h('span', {
+              style: {
+                width: 24, height: 24, borderRadius: 8, display: 'inline-flex', alignItems: 'center',
+                justifyContent: 'center', fontSize: 10,
+                background: 'color-mix(in srgb, var(--dsw-alias-label-primary,#111) 12%, transparent)',
+              },
+            }, '聊'),
+            h('div', {
+              style: {
+                maxWidth: '72%', padding: '7px 10px', borderRadius: '12px 12px 12px 4px',
+                fontSize: 11, lineHeight: 1.5,
+                background: 'color-mix(in srgb, var(--dsw-alias-bg-base,#fff) 82%, transparent)',
+                border: `1px solid ${PANEL_BORDER}`,
+              },
+            }, '今晚换张背景图，看着舒服多了。')),
+          h('div', { style: { display: 'flex', justifyContent: 'flex-end' } },
+            h('div', {
+              style: {
+                maxWidth: '72%', padding: '7px 10px', borderRadius: '12px 12px 4px 12px',
+                fontSize: 11, lineHeight: 1.5,
+                background: 'linear-gradient(135deg,#4d6bfe,#5c72ff)', color: '#fff',
+              },
+            }, '好，就这张。')))),
+          h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 12 } },
+            h('button', {
+              type: 'button',
+              onClick: () => fileRef.current?.click(),
+              disabled: uploading,
+              style: { ...UI.primary, opacity: uploading ? 0.65 : 1 },
+            }, uploading ? '上传中…' : '选择图片'),
+            h('input', {
+              ref: fileRef, type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif',
+              onChange: upload, style: { display: 'none' },
+            }),
+            h('button', { type: 'button', onClick: () => update('background', ''), style: UI.ghost }, '恢复默认'),
+            h('span', { style: UI.muted }, 'JPG / PNG / WebP / GIF · 8 MB 以内；上传后点右上角「保存」生效')),
+          uploadError === '' ? null : h('div', {
+            style: { fontSize: 11.5, color: 'var(--dsw-alias-state-error-primary, #c0392b)', paddingTop: 6 },
+          }, uploadError),
+          h('div', { style: { ...UI.muted, paddingTop: 8 } },
+            background === '' ? '当前：主题纯色' : background.startsWith('preset:') ? '当前：预设背景' : '当前：自定义图片')),
+        h('div', { style: { ...UI.sectionTitle, margin: '8px 0 0' } }, '预设背景'),
+        h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(104px, 1fr))', gap: 8 } },
+          BACKGROUND_PRESETS.map(preset => h('button', {
+            key: preset.id,
+            type: 'button',
+            className: 'dsh-to-qq-chip',
+            onClick: () => update('background', `preset:${preset.id}`),
+            style: {
+              padding: 6, borderRadius: 11, cursor: 'pointer', textAlign: 'left',
+              border: selectedChip(preset.id) ? '2px solid #4d6bfe' : `1px solid ${PANEL_BORDER}`,
+              background: 'var(--dsw-alias-bg-layer-1, rgba(127,127,127,.06))',
+              color: 'inherit', fontSize: 11.5,
+            },
+          },
+          h('span', {
+            style: {
+              display: 'block', height: 46, borderRadius: 7, backgroundImage: preset.css,
+              boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.18)',
+            },
+          }),
+          h('span', { style: { display: 'block', padding: '6px 2px 1px', fontWeight: selectedChip(preset.id) ? 600 : 500 } }, preset.label)))),
+        h('div', { style: { ...UI.sectionTitle, margin: '12px 0 0' } }, '可读性'),
+        h('div', { style: { ...UI.card, padding: '10px 16px 12px' } },
+          h('label', { style: { display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, padding: '5px 0' } },
+            h('span', { style: { ...UI.muted, width: 78, fontSize: 12 } }, '背景遮罩'),
+            h('input', {
+              type: 'range', min: 0, max: 90, value: dim,
+              onChange: event => update('backgroundDim', Number(event.target.value)),
+              style: { flex: 1, accentColor: '#4d6bfe' },
+            }),
+            h('span', { style: { width: 42, textAlign: 'right', fontSize: 11, opacity: 0.6, fontVariantNumeric: 'tabular-nums' } }, `${dim}%`)),
+          h('label', { style: { display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, padding: '5px 0' } },
+            h('span', { style: { ...UI.muted, width: 78, fontSize: 12 } }, '背景模糊'),
+            h('input', {
+              type: 'range', min: 0, max: 20, value: blur,
+              onChange: event => update('backgroundBlur', Number(event.target.value)),
+              style: { flex: 1, accentColor: '#4d6bfe' },
+            }),
+            h('span', { style: { width: 42, textAlign: 'right', fontSize: 11, opacity: 0.6, fontVariantNumeric: 'tabular-nums' } }, `${blur}px`)),
+          h('div', { style: { ...UI.muted, paddingTop: 4 } }, '遮罩越高文字越清楚；模糊只作用于图片，不影响内容')),
+      );
+    };
+
     /** Settings surface: header, tab strip, grouped cards, sticky save state. */
     const SettingsPage = () => {
       const [config, setConfig] = React.useState(null);
@@ -1784,6 +2020,8 @@ const StickerBoard = () => {
           active.group.title === '对话' ? h(StickersHint, { key: 'stickers-hint' }) : null,
           active.group.title === '连接' ? consoleCard : null,
         ].filter(Boolean)
+        : active.custom === 'appearance'
+          ? [h(AppearancePanel, { key: 'appearance', config, setConfig, setStatus })]
         : active.custom === 'stickers'
           ? [h(StickerBoard, { key: 'stickers' })]
         : active.custom === 'accounts'
@@ -1981,6 +2219,9 @@ const StickerBoard = () => {
           fontWeight: 600,
           lineHeight: 1,
           userSelect: 'none',
+          boxShadow: props.ring === true
+            ? `0 0 0 2px ${accent}55, 0 2px 6px rgba(0,0,0,.10)`
+            : '0 1px 3px rgba(0,0,0,.08)',
         },
       },
       initial,
@@ -2174,59 +2415,91 @@ const StickerBoard = () => {
         ? scenes
         : scenes.filter(row => `${row.name ?? ''} ${row.scene}`.toLowerCase().includes(needle));
       const online = state?.transport === 'online';
+      const appearance = state?.appearance ?? {};
+      const background = String(appearance.background ?? '');
+      const backgroundCss = backgroundStyle(background);
+      const hasBackground = backgroundCss.backgroundImage !== undefined;
+      const dim = Math.max(0, Math.min(95, Number(appearance.backgroundDim) || 0));
+      const blur = Math.max(0, Math.min(24, Number(appearance.backgroundBlur) || 0));
+      // Glass only exists while a picture (or preset) is behind the panel; the
+      // plain theme keeps its solid surfaces.
+      const glass = (percent, extra = {}) => ({
+        ...(hasBackground ? {
+          background: `color-mix(in srgb, var(--dsw-alias-bg-base, #fff) ${percent}%, transparent)`,
+          backdropFilter: 'blur(18px) saturate(1.15)',
+          WebkitBackdropFilter: 'blur(18px) saturate(1.15)',
+        } : {}),
+        ...extra,
+      });
 
       // ── left: private chats, then groups ─────────────────────────────
       const conversationButton = row => {
         const isActive = row.scene === active;
+        const accent = sceneAccent(row.scene);
         return h('button', {
           key: row.scene,
           type: 'button',
+          className: 'dsh-to-qq-row',
+          'data-active': isActive ? 'true' : 'false',
           onClick: () => setActive(row.scene),
           style: {
             textAlign: 'left',
             border: 'none',
-            borderRadius: 10,
-            padding: '8px 9px',
+            borderRadius: 11,
+            padding: '9px 9px',
             cursor: 'pointer',
             color: 'inherit',
             display: 'flex',
             alignItems: 'center',
-            gap: 10,
+            gap: 11,
             fontSize: 12,
-            background: isActive ? 'rgba(77,107,254,.12)' : 'transparent',
-            boxShadow: isActive ? 'inset 2px 0 0 #4d6bfe' : 'none',
-            transition: 'background 120ms ease',
           },
         },
-        h(SceneAvatar, { scene: row.scene, name: nameFor(row.scene), size: 34 }),
-        h('span', { style: { display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 } },
+        h(SceneAvatar, { scene: row.scene, name: nameFor(row.scene), size: 38, ring: isActive }),
+        h('span', { style: { display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 } },
         h('span', {
           style: {
-            fontWeight: isActive ? 600 : 500,
+            fontWeight: isActive ? 650 : 520,
+            fontSize: 12.5,
+            letterSpacing: '-.01em',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
           },
         }, nameFor(row.scene)),
-        h('span', { style: { fontSize: 11, opacity: 0.5 } }, `${row.total} 条 · ${String(row.lastAt ?? '').slice(5, 16)}`)));
+        h('span', {
+          style: {
+            display: 'flex', alignItems: 'center', gap: 5, minWidth: 0,
+            fontSize: 10.5, opacity: isActive ? 0.62 : 0.45, whiteSpace: 'nowrap',
+          },
+        },
+        h('span', { style: { width: 4, height: 4, borderRadius: 99, background: accent, flex: '0 0 4px' } }),
+        h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis' } },
+          `${row.total} 条 · ${String(row.lastAt ?? '').slice(5, 16)}`))));
       };
 
       const section = (title, items) => (items.length === 0 ? null : h('div', {
         key: title,
-        style: { display: 'flex', flexDirection: 'column', gap: 2 },
+        style: { display: 'flex', flexDirection: 'column', gap: 2, marginTop: 3 },
       },
       h('div', {
         style: {
           display: 'flex',
           alignItems: 'center',
-          gap: 6,
-          padding: '10px 9px 3px',
-          fontSize: 10.5,
-          fontWeight: 600,
-          letterSpacing: '.04em',
-          opacity: 0.45,
+          gap: 8,
+          padding: '10px 9px 4px',
         },
-      }, title, h('span', { style: { fontWeight: 400 } }, String(items.length))),
+      },
+      h('span', {
+        style: {
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: '.09em',
+          opacity: 0.42,
+        },
+      }, title),
+      h('span', { style: { flex: 1, height: 1, background: PANEL_BORDER, opacity: 0.75 } }),
+      h('span', { style: { fontSize: 10, opacity: 0.38, fontVariantNumeric: 'tabular-nums' } }, String(items.length))),
       items.map(conversationButton)));
 
       const rows = [
@@ -2236,34 +2509,54 @@ const StickerBoard = () => {
 
       const leftPane = h('div', {
         style: {
-          width: 264,
-          flex: '0 0 264px',
+          width: 276,
+          flex: '0 0 276px',
           borderRight: `1px solid ${PANEL_BORDER}`,
           display: 'flex',
           flexDirection: 'column',
           minHeight: 0,
-          background: 'rgba(128,128,128,.03)',
+          ...glass(76),
         },
       },
-      h('div', { style: { padding: '14px 12px 10px', display: 'flex', alignItems: 'center', gap: 8 } },
+      h('div', { style: { padding: '16px 14px 12px', display: 'flex', alignItems: 'center', gap: 9 } },
       h('span', {
         style: {
-          width: 26,
-          height: 26,
-          borderRadius: 9,
+          width: 30,
+          height: 30,
+          borderRadius: 10,
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
           background: 'linear-gradient(135deg,#4d6bfe,#7a5cf0)',
           color: '#fff',
-          fontSize: 13,
+          fontSize: 13.5,
           fontWeight: 700,
+          boxShadow: '0 6px 14px rgba(77,107,254,.28)',
         },
       }, 'Q'),
-      h('span', { style: { fontWeight: 600 } }, 'QQ 对话'),
-      h('span', { style: { marginLeft: 'auto', fontSize: 11, opacity: 0.5 } }, `${scenes.length} 个会话`)),
-      h('div', { style: { padding: '0 12px 10px' } },
+      h('span', { style: { display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 } },
+      h('span', { style: { fontSize: 13, fontWeight: 650, letterSpacing: '-.01em' } }, 'QQ 对话'),
+      h('span', { style: { fontSize: 10, opacity: 0.42 } }, online ? '实时同步' : '等待连接')),
+      h('span', {
+        style: {
+          marginLeft: 'auto', fontSize: 10.5, opacity: 0.55, padding: '2px 7px', borderRadius: 20,
+          background: 'color-mix(in srgb, var(--dsw-alias-label-primary,#111) 6%, transparent)',
+          flex: '0 0 auto',
+        },
+      }, `${scenes.length} 个`)),
+      h('div', { style: { padding: '0 14px 12px', position: 'relative' } },
+      h('svg', {
+        width: 13, height: 13, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
+        strokeWidth: 2, strokeLinecap: 'round',
+        style: {
+          position: 'absolute', left: 24, top: '50%', transform: 'translateY(-50%)',
+          opacity: 0.38, pointerEvents: 'none',
+        },
+      },
+      h('circle', { cx: 11, cy: 11, r: 7 }),
+      h('path', { d: 'M20 20l-3.5-3.5' })),
       h('input', {
+        className: 'dsh-to-qq-search',
         value: query,
         onChange: event => setQuery(event.target.value),
         placeholder: '搜索会话',
@@ -2271,18 +2564,22 @@ const StickerBoard = () => {
           width: '100%',
           boxSizing: 'border-box',
           border: `1px solid ${PANEL_BORDER}`,
-          borderRadius: 9,
-          padding: '6px 10px',
+          borderRadius: 11,
+          padding: '8px 10px 8px 31px',
           fontSize: 12,
+          fontFamily: 'inherit',
           color: 'inherit',
-          background: 'var(--dsw-alias-bg-base, #fff)',
+          background: 'color-mix(in srgb, var(--dsw-alias-bg-base,#fff) 72%, transparent)',
           outline: 'none',
         },
       })),
-      h('div', { style: { overflowY: 'auto', padding: '0 8px 10px', display: 'flex', flexDirection: 'column', gap: 3, minHeight: 0 } },
+      h('div', {
+        className: 'dsh-to-qq-scroll',
+        style: { overflowY: 'auto', padding: '0 8px 12px', display: 'flex', flexDirection: 'column', gap: 3, minHeight: 0 },
+      },
       rows,
       rows.length === 0
-        ? h('div', { style: { opacity: 0.5, padding: 12, fontSize: 12, textAlign: 'center' } }, scenes.length === 0 ? '还没有消息记录' : '没有匹配的会话')
+        ? h('div', { style: { opacity: 0.5, padding: 16, fontSize: 12, textAlign: 'center' } }, scenes.length === 0 ? '还没有消息记录' : '没有匹配的会话')
         : null));
 
       // ── right: thread ────────────────────────────────────────────────
@@ -2343,22 +2640,39 @@ const StickerBoard = () => {
 
         const bubble = h('div', {
           style: {
-            background: out ? 'linear-gradient(135deg,#4d6bfe,#5c72ff)' : 'rgba(128,128,128,.13)',
+            background: out
+              ? 'linear-gradient(135deg,#4d6bfe,#6b7cff)'
+              : hasBackground
+                ? 'color-mix(in srgb, var(--dsw-alias-bg-base,#fff) 82%, transparent)'
+                : 'rgba(128,128,128,.13)',
             color: out ? '#fff' : 'inherit',
-            borderRadius: 13,
-            borderTopRightRadius: out ? 4 : 13,
-            borderTopLeftRadius: out ? 13 : 4,
-            padding: '8px 11px',
-            boxShadow: out ? '0 1px 2px rgba(40,60,180,.18)' : '0 1px 2px rgba(0,0,0,.05)',
+            borderRadius: 15,
+            borderTopRightRadius: out ? 5 : 15,
+            borderTopLeftRadius: out ? 15 : 5,
+            padding: '9px 12px',
+            border: !out && hasBackground ? `1px solid ${PANEL_BORDER}` : 'none',
+            backdropFilter: !out && hasBackground ? 'blur(10px)' : undefined,
+            WebkitBackdropFilter: !out && hasBackground ? 'blur(10px)' : undefined,
+            boxShadow: out ? '0 4px 12px rgba(40,60,180,.22)' : '0 1px 3px rgba(0,0,0,.06)',
             minWidth: 0,
           },
         }, parts);
 
         return h('div', {
           key: `${entry.msg_id}-${entry.time_bj}-${index}`,
-          style: { display: 'flex', flexDirection: 'column', gap: 4 },
+          style: { display: 'flex', flexDirection: 'column', gap: 5 },
         },
-        showDay ? h('div', { style: { alignSelf: 'center', fontSize: 11, opacity: 0.45, padding: '4px 0' } }, day) : null,
+        showDay ? h('div', {
+          style: { display: 'flex', alignItems: 'center', gap: 10, alignSelf: 'stretch', padding: '4px 0' },
+        },
+        h('span', { style: { flex: 1, height: 1, background: PANEL_BORDER, opacity: 0.8 } }),
+        h('span', {
+          style: {
+            fontSize: 10.5, opacity: 0.45, padding: '2px 8px', borderRadius: 20,
+            background: 'color-mix(in srgb, var(--dsw-alias-bg-base,#fff) 55%, transparent)',
+          },
+        }, day),
+        h('span', { style: { flex: 1, height: 1, background: PANEL_BORDER, opacity: 0.8 } })) : null,
         h('div', { style: { display: 'flex', flexDirection: out ? 'row-reverse' : 'row', gap: 8, alignItems: 'flex-start' } },
         h('span', {
           style: {
@@ -2373,6 +2687,7 @@ const StickerBoard = () => {
             fontWeight: 600,
             background: out ? 'rgba(77,107,254,.16)' : 'rgba(128,128,128,.16)',
             color: out ? '#3b53c9' : 'inherit',
+            boxShadow: '0 1px 3px rgba(0,0,0,.06)',
           },
         }, out ? '我' : name.slice(0, 1)),
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, maxWidth: '72%', alignItems: out ? 'flex-end' : 'flex-start' } },
@@ -2382,18 +2697,23 @@ const StickerBoard = () => {
 
       const header = h('div', {
         style: {
-          padding: '12px 18px',
+          padding: '13px 18px',
           borderBottom: `1px solid ${PANEL_BORDER}`,
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
-          minHeight: 30,
+          gap: 11,
+          minHeight: 36,
+          ...glass(68),
         },
       },
-      active === null ? null : h(SceneAvatar, { scene: active, name: nameFor(active), size: 28 }),
+      active === null ? null : h(SceneAvatar, { scene: active, name: nameFor(active), size: 36, ring: true }),
+      h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 } },
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 } },
       h('span', {
         style: {
-          fontWeight: 600,
+          fontSize: 14.5,
+          fontWeight: 650,
+          letterSpacing: '-.015em',
           minWidth: 0,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -2403,41 +2723,59 @@ const StickerBoard = () => {
       active === null ? null : h('span', {
         style: {
           fontSize: 10.5,
-          padding: '1px 7px',
+          padding: '2px 8px',
           borderRadius: 20,
           background: `${sceneAccent(active)}14`,
           color: sceneAccent(active),
           flex: '0 0 auto',
+          fontWeight: 500,
         },
       }, kindOf(active) === 'group' ? '群聊' : '私聊'),
       h('span', {
         style: {
-          fontSize: 11,
-          padding: '1px 7px',
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+          fontSize: 10.5,
+          padding: '2px 8px',
           borderRadius: 20,
-          background: online ? 'rgba(18,160,106,.12)' : 'rgba(192,57,43,.12)',
+          background: online ? 'rgba(18,160,106,.12)' : 'rgba(192,57,43,.10)',
           color: online ? '#0d8a5b' : '#c0392b',
+          flex: '0 0 auto',
         },
-      }, state === null ? '读取中' : (online ? '已连接' : String(state.transport ?? '离线'))),
-      h('span', { style: { fontSize: 11, opacity: 0.45, marginLeft: 'auto' } }, `${messages.length} 条`),
-      error === '' ? null : h('span', { style: { fontSize: 11, color: '#c0392b' } }, error));
+      },
+      h(Dot, { color: online ? '#12a06a' : '#c0392b', pulse: state?.transport === 'connecting' || state?.transport === 'backoff' }),
+      state === null ? '读取中' : (online ? '已连接' : String(state.transport ?? '离线')))),
+      h('div', { style: { fontSize: 10.5, opacity: 0.42, display: 'flex', gap: 8, minWidth: 0 } },
+      h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+        active === null ? '选择一个会话' : `${kindOf(active) === 'group' ? '群聊' : '私聊'} · ${messages.length} 条消息`),
+      error === '' ? null : h('span', { style: { color: '#c0392b', opacity: 1 } }, error))),
+      h('span', { style: { marginLeft: 'auto', fontSize: 10.5, opacity: 0.4, flex: '0 0 auto' } }, `${messages.length} 条`));
 
       const thread = h('div', {
         onScroll,
         ref: scrollRef,
+        className: 'dsh-to-qq-scroll',
         style: {
           flex: 1,
           minHeight: 0,
           overflowY: 'auto',
-          padding: '16px 18px 20px',
+          padding: '18px 20px 24px',
           display: 'flex',
           flexDirection: 'column',
-          gap: 10,
-          background: 'linear-gradient(180deg, rgba(128,128,128,.04), rgba(0,0,0,0) 140px)',
+          gap: 12,
+          background: hasBackground ? 'transparent' : 'linear-gradient(180deg, rgba(128,128,128,.045), rgba(0,0,0,0) 160px)',
         },
       },
       bubbles.length === 0
-        ? h('div', { style: { margin: 'auto', opacity: 0.45, fontSize: 12 } }, '这个会话还没有记录')
+        ? h('div', { style: { margin: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, opacity: 0.55 } },
+          h('span', {
+            style: {
+              width: 52, height: 52, borderRadius: 17, display: 'inline-flex',
+              alignItems: 'center', justifyContent: 'center',
+              background: 'linear-gradient(135deg,#4d6bfe,#7a5cf0)', color: '#fff',
+              fontSize: 22, fontWeight: 700, boxShadow: '0 8px 20px rgba(77,107,254,.28)',
+            },
+          }, 'Q'),
+          h('span', { style: { fontSize: 12 } }, '这个会话还没有记录'))
         : bubbles);
 
       const pill = pending === 0 ? null : h('button', {
@@ -2466,15 +2804,45 @@ const StickerBoard = () => {
 
       return h('div', {
         style: {
+          height: '100%',
+          minHeight: 0,
+          boxSizing: 'border-box',
+          padding: 10,
+          background: 'var(--dsw-alias-bg-base, #fff)',
+        },
+      },
+      h('div', {
+        style: {
+          position: 'relative',
           display: 'flex',
           height: '100%',
           minHeight: 0,
           overflow: 'hidden',
+          borderRadius: 18,
+          border: `1px solid ${PANEL_BORDER}`,
+          boxShadow: '0 18px 44px rgba(15,23,42,.12)',
           background: 'var(--dsw-alias-bg-base, #fff)',
           color: 'var(--dsw-alias-label-primary, #1c1f24)',
           fontSize: 13,
         },
-      }, leftPane, rightPane);
+      },
+      hasBackground ? h('div', {
+        style: {
+          position: 'absolute', inset: 0, ...backgroundCss,
+          backgroundSize: 'cover', backgroundPosition: 'center',
+          filter: blur > 0 ? `blur(${blur}px)` : 'none',
+          transform: blur > 0 ? 'scale(1.06)' : 'none',
+        },
+      }) : null,
+      hasBackground ? h('div', {
+        style: {
+          position: 'absolute', inset: 0,
+          background: `color-mix(in srgb, var(--dsw-alias-bg-base, #fff) ${dim}%, transparent)`,
+        },
+      }) : null,
+      h('div', {
+        style: { position: 'relative', zIndex: 1, display: 'flex', height: '100%', minHeight: 0, width: '100%' },
+      }, leftPane, rightPane)));
     };
 
     /** Slot entry for the settings surface. */
