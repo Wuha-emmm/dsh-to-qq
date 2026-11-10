@@ -1790,6 +1790,8 @@ const StickerBoard = () => {
       const jumpRef = React.useRef(false);
       // Where the reader actually was, so a poll never yanks them to the top.
       const savedTopRef = React.useRef(0);
+      // Which row sits at the top of the visible area, keyed by message id.
+      const anchorRef = React.useRef({ key: '', offset: 0 });
       const lastKeyRef = React.useRef('');
       const lastCountRef = React.useRef(0);
 
@@ -1838,6 +1840,7 @@ const StickerBoard = () => {
         stickRef.current = true;
         jumpRef.current = true;
         savedTopRef.current = 0;
+        anchorRef.current = { key: '', offset: 0 };
         lastKeyRef.current = '';
         lastCountRef.current = 0;
       }, [active]);
@@ -1881,31 +1884,60 @@ const StickerBoard = () => {
         };
       }, [active]);
 
-      // Land at the bottom when the thread opens; while the reader stays at the
-      // bottom every new message keeps the newest line in view.
-      React.useEffect(() => {
+      // Which row currently sits at the top of the visible area, and how far it
+      // is from the viewport edge. Rows are keyed by message id, so the answer
+      // stays valid even when the oldest row falls out of the 80-row window.
+      const rememberAnchor = () => {
+        const element = scrollRef.current;
+        if (element === null) return;
+        const box = element.getBoundingClientRect();
+        const rows = element.querySelectorAll('[data-key]');
+        for (const row of rows) {
+          const rect = row.getBoundingClientRect();
+          if (rect.bottom > box.top + 1) {
+            anchorRef.current = { key: row.getAttribute('data-key') ?? '', offset: rect.top - box.top };
+            return;
+          }
+        }
+        anchorRef.current = { key: '', offset: 0 };
+      };
+
+      // Land at the bottom when the thread opens, and follow every new message
+      // while the reader is already there. Further up, the scrollbar is moved by
+      // exactly the height the old rows lost, so the text under the eyes never
+      // moves; the "新消息" pill is the only thing that changes.
+      React.useLayoutEffect(() => {
         const element = scrollRef.current;
         if (element === null || messages.length === 0) return;
-        const land = () => {
-          if (!stickRef.current) return;
-          element.scrollTop = element.scrollHeight;
-          savedTopRef.current = element.scrollTop;
-        };
         if (jumpRef.current) {
           stickRef.current = true;
           jumpRef.current = false;
-          land();
+          element.scrollTop = element.scrollHeight;
+          savedTopRef.current = element.scrollTop;
           return;
         }
         if (stickRef.current) {
-          land();
+          element.scrollTop = element.scrollHeight;
           // Images and media load after this frame and make the thread taller.
-          window.requestAnimationFrame(land);
+          window.requestAnimationFrame(() => {
+            if (!stickRef.current) return;
+            element.scrollTop = element.scrollHeight;
+            savedTopRef.current = element.scrollTop;
+          });
+          savedTopRef.current = element.scrollTop;
           setPending(count => (count === 0 ? count : 0));
           return;
         }
-        // Reading history: put the scrollbar back exactly where it was.
-        element.scrollTop = savedTopRef.current;
+        const anchor = anchorRef.current;
+        if (anchor.key !== '') {
+          const row = element.querySelector(`[data-key="${window.CSS?.escape ? window.CSS.escape(anchor.key) : anchor.key}"]`);
+          if (row !== null) {
+            const box = element.getBoundingClientRect();
+            element.scrollTop += row.getBoundingClientRect().top - box.top - anchor.offset;
+          }
+        }
+        savedTopRef.current = element.scrollTop;
+        rememberAnchor();
       }, [messages]);
 
       const onScroll = () => {
@@ -1914,11 +1946,11 @@ const StickerBoard = () => {
         savedTopRef.current = element.scrollTop;
         const max = element.scrollHeight - element.clientHeight;
         // No overflow (or the panel has no height yet) means the reader is
-        // already at the bottom; treating that as "scrolled up" is what used
-        // to send the next new message back to the very top.
+        // already at the bottom.
         const near = max <= 1 || max - element.scrollTop < 64;
         stickRef.current = near;
         if (near) setPending(count => (count === 0 ? count : 0));
+        rememberAnchor();
       };
 
       const jumpToLatest = () => {
@@ -2207,6 +2239,7 @@ const StickerBoard = () => {
 
         return h('div', {
           key: `${entry.msg_id}-${entry.time_bj}-${index}`,
+          'data-key': entry.msg_id ? String(entry.msg_id) : `${entry.time_bj}|${entry.sender_id ?? ''}`,
           style: { display: 'flex', flexDirection: 'column', gap: 5 },
         },
         showDay ? h('div', {
