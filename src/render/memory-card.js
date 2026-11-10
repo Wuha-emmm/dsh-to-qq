@@ -8,7 +8,7 @@
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** Script that draws the card. */
@@ -99,6 +99,16 @@ async function findBackdrop(directory, key) {
     } catch {
       // try the next candidate
     }
+  }
+  // Nothing of its own: reuse the panel wallpaper the owner already picked,
+  // which lives next to the media directory. Cards keep looking like the same
+  // product instead of falling back to a plain dark sheet.
+  const shared = join(dirname(directory), 'panel-background.img');
+  try {
+    const info = await stat(shared);
+    if (info.isFile() && info.size > 1024) return shared;
+  } catch {
+    // no wallpaper either
   }
   return '';
 }
