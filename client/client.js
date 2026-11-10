@@ -1783,6 +1783,10 @@ const StickerBoard = () => {
       const [loading, setLoading] = React.useState(false);
       const [open, setOpen] = React.useState({});
       const [translations, setTranslations] = React.useState({});
+      // An open reasoning block belongs to a message, not to a row position:
+      // the 80-row window drops its oldest row on every new message, and an
+      // index-keyed block would jump down onto the next message each time.
+      const rowKeyOf = entry => (entry.msg_id ? String(entry.msg_id) : `${entry.time_bj}|${entry.sender_id ?? ''}|${entry.direction ?? ''}`);
       const [query, setQuery] = React.useState('');
       const [pending, setPending] = React.useState(0);
       const scrollRef = React.useRef(null);
@@ -1963,19 +1967,21 @@ const StickerBoard = () => {
       };
 
       const toggleReasoning = index => {
-        setOpen(current => ({ ...current, [index]: current[index] !== true }));
         const entry = messages[index];
-        if (entry === undefined || typeof entry.reasoning !== 'string' || entry.reasoning === '') return;
-        if (translations[index] !== undefined) return;
-        setTranslations(current => ({ ...current, [index]: { status: 'loading' } }));
+        if (entry === undefined) return;
+        const key = rowKeyOf(entry);
+        setOpen(current => ({ ...current, [key]: current[key] !== true }));
+        if (typeof entry.reasoning !== 'string' || entry.reasoning === '') return;
+        if (translations[key] !== undefined) return;
+        setTranslations(current => ({ ...current, [key]: { status: 'loading' } }));
         postJson('/dsh-to-qq/api/translate', { text: entry.reasoning })
           .then(data => setTranslations(current => ({
             ...current,
-            [index]: data.translated === false
+            [key]: data.translated === false
               ? { status: 'unavailable', text: String(data.text ?? ''), note: String(data.error ?? '') }
               : { status: 'ok', text: String(data.text ?? '') },
           })))
-          .catch(reason => setTranslations(current => ({ ...current, [index]: { status: 'error', text: String(reason?.message ?? reason) } })));
+          .catch(reason => setTranslations(current => ({ ...current, [key]: { status: 'error', text: String(reason?.message ?? reason) } })));
       };
 
       const kindOf = scene => (String(scene).startsWith('group:') ? 'group' : 'dm');
@@ -2166,9 +2172,10 @@ const StickerBoard = () => {
       // ── right: thread ────────────────────────────────────────────────
       const bubbles = messages.map((entry, index) => {
         const out = entry.direction === 'out';
+        const rowKey = rowKeyOf(entry);
         const hasReasoning = typeof entry.reasoning === 'string' && entry.reasoning !== '';
-        const isOpen = open[index] === true;
-        const translation = translations[index];
+        const isOpen = open[rowKey] === true;
+        const translation = translations[rowKey];
         const name = out ? '我' : String(entry.sender_name ?? '对方');
         const clock = String(entry.time_bj ?? '').slice(11, 16);
         const day = String(entry.time_bj ?? '').slice(0, 10);
@@ -2239,7 +2246,7 @@ const StickerBoard = () => {
 
         return h('div', {
           key: `${entry.msg_id}-${entry.time_bj}-${index}`,
-          'data-key': entry.msg_id ? String(entry.msg_id) : `${entry.time_bj}|${entry.sender_id ?? ''}`,
+          'data-key': rowKey,
           style: { display: 'flex', flexDirection: 'column', gap: 5 },
         },
         showDay ? h('div', {
