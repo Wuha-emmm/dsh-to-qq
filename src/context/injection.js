@@ -166,7 +166,7 @@ export class InjectionTracker {
         for (const [key, hash] of store) blocks.push({ slot, key: String(key), hash });
       }
     }
-    for (const slot of ['rules', 'stickers', 'length']) {
+    for (const slot of ['rules', 'stickers', 'length', 'scopeFix']) {
       const hash = this[`${slot}Hash`];
       if (typeof hash === 'string' && hash !== '') blocks.push({ slot, key: '', hash });
     }

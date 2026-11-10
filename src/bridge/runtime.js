@@ -1421,7 +1421,11 @@ export class Bridge {
         seed = formatRecap(rows);
         if (seed !== '') this.pendingContinue.add(message.scene);
       }
-      const promptBase = tier === 'owner'
+      // Scene decides the shape, not the sender: an admin asking inside a group
+      // still needs the group window and the group rules. Handing them the
+      // private prompt made the shared session treat the whole room as their
+      // private chat, and the other members' cards then read as if they were his.
+      const promptBase = message.kind === 'dm'
         ? this.#privatePrompt(message, config, card, quotedText, injection)
         : this.#groupPrompt(message, config, card, quotedText, injection);
       const stickers = imageSegments(message.segments).filter(looksLikeSticker).length;
@@ -2512,7 +2516,8 @@ export class Bridge {
       maxChars: 4000,
     });
     const header = injection === undefined ? contextHeader(true) : injection.fixed('ctxhdr-dm', contextHeader(true), message.scene);
-    const parts = [card, header, context, body + quote].filter(part => part !== '');
+    // Card next to the message it governs, not at the top of a long window.
+    const parts = [header, context, card, body + quote].filter(part => part !== '');
     return parts.join('\n\n');
   }
 
@@ -2695,14 +2700,25 @@ export class Bridge {
     const privacy = config.conversation.groupPrivacy === false
       ? ''
       : injection.fixed('rules', '【群聊规则】上下文里其他成员的消息只用于理解你们在聊什么，不要复述、总结、转述或引用其中任何一句；被问到“别人说了什么”时，只回答你自己看到的本轮内容。回复里直接写 @名字 就会真的 @ 到对方（桥会把它转成真正的 @ 段），不要只写名字。记忆卡按人区分：卡头写着名字和 QQ 号，只对卡上那个人生效，不要把它的人设或印象套到别人身上；你此刻在对话的是【当前提问】里那个名字和 QQ 号，其余卡只当背景。');
-    const scope = injection.fixed(
-      'scope',
-      `【作用域】这次向你提问的是 ${message.senderName}(${message.senderId})。上下文里出现过的记忆卡只属于卡头写的那个人，只照【当前提问】这个人说话；别人的称呼习惯、人设、印象一律不要往对方身上套。`,
-      message.senderId,
-    );
     const header = injection.fixed('ctxhdr', contextHeader(false), message.scene);
-    const ask = `【当前提问】${message.senderName}(${message.senderId}): ${message.text === '' ? '（非文本消息）' : message.text}`;
-    const parts = [card, header, block, privacy, scope, ask].filter(part => part !== '');
+    // Sessions that ran the old code already carry one 【作用域】line per speaker,
+    // and all of them read as "this turn it is me". Void the pile once so the
+    // per-turn line is the only rule left standing.
+    const scopeFix = injection.scopeHash.size > 0
+      ? injection.fixed('scopeFix', '【作用域更正】上文那些「这次向你提问的是 X」的旧说明全部作废：它们是按人各存一份的，换个发言人就会被翻出来误导。只认每一轮【当前提问】下面那行括号，它才指当轮说话的人。', message.scene)
+      : '';
+    const askText = message.text === '' ? '（非文本消息）' : message.text;
+    // The scope used to be a block of its own, one per speaker, so a busy group
+    // piled up several contradicting "this turn it is A" lines in the session and
+    // the model could follow any of them. Say it once per turn, directly under
+    // the question, where the newest copy always wins.
+    const ask = [
+      `【当前提问】${message.senderName}(${message.senderId})：${askText}`,
+      `（这轮只跟 ${message.senderName} 说话：称呼、语气按 ${message.senderName}(${message.senderId}) 的记忆卡来，上文别人的卡和摘要里旧的卡都不适用）`,
+    ].join('\n');
+    // The card sits right above the question: when a new speaker's card does go
+    // out, it is the nearest thing to the turn that needs it.
+    const parts = [header, block, privacy, card, scopeFix, ask].filter(part => part !== '');
     return parts.join('\n\n');
   }
 

@@ -1,6 +1,6 @@
 {
   "name": "dsh-to-qq",
-  "version": "0.90.0",
+  "version": "0.90.1",
   "description": "QQ <-> DeepSeek Harness bridge: chat with your local DSH from a QQ account through SnowLuma/OneBot",
   "type": "module",
   "main": "src/index.js",
@@ -43,14 +43,6 @@
       "immediately": true
     }
   },
-  "scripts": {
-    "test": "node --test \"test/*.test.mjs\"",
-    "smoke": "node scripts/smoke.mjs",
-    "inventory": "node scripts/inventory.mjs",
-    "rehearse": "node scripts/rehearse.mjs",
-    "docs": "node scripts/docs-config.mjs",
-    "docs:check": "node scripts/docs-config.mjs --check"
-  },
   "engines": {
     "node": ">=22"
   },
@@ -63,5 +55,13 @@
     "chatbot",
     "bridge"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\"",
+    "smoke": "node scripts/smoke.mjs",
+    "inventory": "node scripts/inventory.mjs",
+    "rehearse": "node scripts/rehearse.mjs",
+    "docs": "node scripts/docs-config.mjs",
+    "docs:check": "node scripts/docs-config.mjs --check"
+  }
 }
