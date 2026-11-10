@@ -716,22 +716,39 @@ export function apply(ctx) {
     const provider = route.provider;
     const model = route.model;
     if (provider === '' || model === '') return undefined;
-    let output = '';
-    const chunks = llm.stream({
-      provider,
-      model,
-      system: '你是翻译助手。把用户给的文本翻译成简体中文，只输出译文，保留换行与列表结构；不要解释，不要加引号。',
-      messages: [{ role: 'user', content: [{ type: 'text', text: text.slice(0, 4000) }] }],
-      maxTokens: 2000,
-      temperature: 0,
-    });
-    for await (const chunk of chunks) {
-      if (chunk?.type === 'text-delta' && typeof chunk.text === 'string') output += chunk.text;
-      if (chunk?.type === 'finish' && chunk.reason?.kind === 'error') {
-        throw new Error(chunk.reason.failure?.message ?? 'model translation failed');
+    const source = text.slice(0, 4000);
+    const run = async effort => {
+      const request = {
+        provider,
+        model,
+        system: '你是翻译助手。把用户给的文本翻译成简体中文，只输出译文，保留换行与列表结构；不要解释，不要加引号。',
+        messages: [{ role: 'user', content: [{ type: 'text', text: source }] }],
+        maxTokens: 2000,
+        temperature: 0,
+      };
+      // Translation is a mechanical task: the route's effort (usually low) is
+      // enough, and honoring it keeps the answer from sitting behind a long
+      // chain of thought.
+      if (effort !== '') request.reasoningEffort = effort;
+      let output = '';
+      for await (const chunk of llm.stream(request)) {
+        if (chunk?.type === 'text-delta' && typeof chunk.text === 'string') output += chunk.text;
+        if (chunk?.type === 'finish' && chunk.reason?.kind === 'error') {
+          throw new Error(chunk.reason.failure?.message ?? 'model translation failed');
+        }
       }
+      return output.trim();
+    };
+    if (route.effort === '') return run('');
+    try {
+      return await run(route.effort);
+    } catch (error) {
+      // A provider that does not know this effort id should not cost the user
+      // the translation: retry once at the provider's default.
+      if (!/effort/i.test(String(error?.message ?? error))) throw error;
+      log(`translation effort ${route.effort} rejected: ${String(error?.message ?? error).slice(0, 120)}`);
+      return run('');
     }
-    return output.trim();
   };
 
 

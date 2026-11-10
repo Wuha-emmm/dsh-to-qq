@@ -2203,8 +2203,12 @@ const StickerBoard = () => {
         }
         if (isOpen) {
           const body = [];
-          if (translation?.status === 'loading') body.push('翻译中…');
-          else if (translation?.status === 'ok') body.push(translation.text);
+          if (translation?.status === 'loading') {
+            // Never make the reader wait on the model: the original is already
+            // here, the translation drops in when it arrives.
+            body.push(entry.reasoning);
+            body.push(h('div', { style: { marginTop: 6, opacity: 0.55 } }, '翻译中…'));
+          } else if (translation?.status === 'ok') body.push(translation.text);
           else body.push(entry.reasoning);
           if (translation?.status === 'error') body.push(h('div', { style: { marginTop: 6, opacity: 0.65 } }, `（翻译失败：${translation.text}）`));
           if (translation?.status === 'unavailable') body.push(h('div', { style: { marginTop: 6, opacity: 0.65 } }, `（自动翻译不可用：${translation.note || '无可用翻译路由'}）`));
