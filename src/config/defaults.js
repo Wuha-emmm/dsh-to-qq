@@ -150,6 +150,12 @@ export function defaults() {
       sendProcessingHint: false,
       /** Show the QQ "typing" state instead: no bubble, same feedback. */
       sendTypingStatus: true,
+      /**
+       * In a group, open each text reply with an @ to the person being answered.
+       * Shared group sessions make "who is this for" ambiguous when several
+       * people ask at once; the mention makes it explicit.
+       */
+      groupAtReply: true,
     },
     archive: {
       enabled: true,
@@ -200,12 +206,6 @@ export function defaults() {
       /** How long `/yes!` and `/全放行` keep a tool open; long tasks need more than five minutes. */
       toolGrantMinutes: 15,
       audit: true,
-    },
-    ui: {
-      /** Integrate with dsh-pet when it is installed: menu entry, bubbles, work status. */
-      pet: true,
-      /** dsh-pet instance id. */
-      petId: 'main',
     },
     appearance: {
       /** '', `preset:<id>`, or the uploaded panel background URL. */
@@ -342,8 +342,7 @@ export function normalize(config) {
   if (typeof config.connection.autoStart !== 'boolean') config.connection.autoStart = true;
   if (typeof config.output.sendProcessingHint !== 'boolean') config.output.sendProcessingHint = false;
   if (typeof config.output.sendTypingStatus !== 'boolean') config.output.sendTypingStatus = true;
-  if (typeof config.ui.pet !== 'boolean') config.ui.pet = true;
-  if (typeof config.ui.petId !== 'string' || config.ui.petId === '') config.ui.petId = 'main';
+  if (typeof config.output.groupAtReply !== 'boolean') config.output.groupAtReply = true;
   for (const key of ['auto', 'includeMedia', 'includeCookies']) {
     if (typeof config.backup?.[key] !== 'boolean') config.backup[key] = defaults().backup[key];
   }

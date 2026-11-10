@@ -1,13 +1,9 @@
 /**
  * dsh-to-qq — browser half.
  *
- * A floating companion in `shell.overlay`: drag it anywhere, click it to expand
- * the QQ panel, double-click to collapse. No build step — the DSH client module
+ * Fills three host slots: the QQ conversation as a main-area panel, its sidebar
+ * row, and the bridge settings section. No build step — the DSH client module
  * loader hands us React, and this file writes elements directly.
- *
- * The companion visual is intentionally a placeholder: `PetStage` below renders
- * an inline SVG, and a real animation clip can replace it without touching the
- * drag, panel, or positioning code.
  */
 window.__ModuleLoader__.load({
   id: 'dsh-to-qq',
@@ -40,77 +36,6 @@ window.__ModuleLoader__.load({
       }
       sheet.textContent = STYLE_TEXT;
     }
-
-    /** Overlay id used for slot registration and CSS scoping. */
-    const SLOT_ID = 'dsh-to-qq-pet';
-    /** localStorage key for the remembered position and panel state. */
-    const STORE_KEY = 'dsh-to-qq:overlay';
-
-    /** Read the remembered overlay state. */
-    const readState = () => {
-      try {
-        const parsed = JSON.parse(window.localStorage.getItem(STORE_KEY) ?? '{}');
-        return {
-          x: Number.isFinite(parsed.x) ? parsed.x : window.innerWidth - 120,
-          y: Number.isFinite(parsed.y) ? parsed.y : window.innerHeight - 180,
-          open: parsed.open === true,
-        };
-      } catch {
-        return { x: window.innerWidth - 120, y: window.innerHeight - 180, open: false };
-      }
-    };
-
-    /** Persist the overlay state. */
-    const writeState = state => {
-      try {
-        window.localStorage.setItem(STORE_KEY, JSON.stringify(state));
-      } catch {
-        // Private mode: position simply is not remembered.
-      }
-    };
-
-    /** Keep the bubble fully inside the viewport. */
-    const clamp = (x, y, size) => ({
-      x: Math.max(8, Math.min(x, window.innerWidth - size - 8)),
-      y: Math.max(8, Math.min(y, window.innerHeight - size - 8)),
-    });
-
-    /** Inline companion artwork: a soft whale-ish blob, no external asset. */
-    const PetStage = props => h(
-      'svg',
-      { width: props.size, height: props.size, viewBox: '0 0 96 96', 'aria-hidden': 'true' },
-      h('defs', null,
-        h('radialGradient', { id: 'dsh-to-qq-body', cx: '35%', cy: '30%', r: '80%' },
-          h('stop', { offset: '0', stopColor: '#7aa2ff' }),
-          h('stop', { offset: '1', stopColor: '#3b5bdb' }))),
-      h('ellipse', { cx: 48, cy: 52, rx: 32, ry: 30, fill: 'url(#dsh-to-qq-body)' }),
-      h('circle', { cx: 37, cy: 47, r: 4.2, fill: '#fff' }),
-      h('circle', { cx: 59, cy: 47, r: 4.2, fill: '#fff' }),
-      h('circle', { cx: 38, cy: 48, r: 2.1, fill: '#16213e' }),
-      h('circle', { cx: 60, cy: 48, r: 2.1, fill: '#16213e' }),
-      h('path', { d: 'M40 62q8 7 16 0', stroke: '#16213e', strokeWidth: 2.4, fill: 'none', strokeLinecap: 'round' }),
-      h('path', { d: 'M24 34q6-10 18-9', stroke: '#ffffff', strokeWidth: 3, fill: 'none', opacity: 0.55, strokeLinecap: 'round' }),
-    );
-
-    /**
-     * Locate the dsh-pet element in this page.
-     *
-     * The pet's animation clips are served from `/dsh-pet-7340/thumb/`, so the
-     * video carrying such a source is the pet. Returns viewport pixels.
-     *
-     * @returns {{ x: number, y: number } | null} Pet centre, or null when absent.
-     */
-    const findPetAnchor = () => {
-      const videos = document.querySelectorAll('video');
-      for (const video of videos) {
-        const source = video.currentSrc || video.src || '';
-        if (!source.includes('/dsh-pet-7340/')) continue;
-        const rect = video.getBoundingClientRect();
-        if (rect.width < 8 || rect.height < 8) continue;
-        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-      }
-      return null;
-    };
 
     /** Fetch JSON from the bridge with the page's own session. */
     const getJson = async path => {
@@ -146,407 +71,6 @@ window.__ModuleLoader__.load({
       return data;
     };
 
-    /** Scene list and message log, loaded from the bridge. */
-    const PanelBody = props => {
-      const [state, setState] = React.useState(null);
-      const [active, setActive] = React.useState(null);
-      const [messages, setMessages] = React.useState([]);
-      const [expanded, setExpanded] = React.useState(null);
-      const [translations, setTranslations] = React.useState({});
-      const [error, setError] = React.useState('');
-      const scrollRef = React.useRef(null);
-
-      // Always land on the newest message, exactly like a chat app.
-      React.useEffect(() => {
-        const element = scrollRef.current;
-        if (element !== null) element.scrollTop = element.scrollHeight;
-      }, [messages, expanded]);
-
-      /** Expand one reply's reasoning, translating it on first open. */
-      const toggleReasoning = index => {
-        const next = expanded === index ? null : index;
-        setExpanded(next);
-        if (next === null) return;
-        const entry = messages[index];
-        if (entry === undefined || typeof entry.reasoning !== 'string' || entry.reasoning === '') return;
-        if (translations[index] !== undefined) return;
-        setTranslations(current => ({ ...current, [index]: { status: 'loading' } }));
-        postJson('/dsh-to-qq/api/translate', { text: entry.reasoning })
-          .then(data => setTranslations(current => ({
-            ...current,
-            [index]: data.translated === false
-              ? { status: 'unavailable', text: String(data.text ?? ''), note: String(data.error ?? '') }
-              : { status: 'ok', text: String(data.text ?? '') },
-          })))
-          .catch(reason => setTranslations(current => ({ ...current, [index]: { status: 'error', text: String(reason?.message ?? reason) } })));
-      };
-
-      React.useEffect(() => {
-        if (props.open !== true) return undefined;
-        let cancelled = false;
-        setError('');
-        getJson('/dsh-to-qq/api/state')
-          .then(data => {
-            if (!cancelled) setState(data);
-          })
-          .catch(reason => {
-            if (!cancelled) setError(String(reason?.message ?? reason));
-          });
-        return () => {
-          cancelled = true;
-        };
-      }, [props.open]);
-
-      React.useEffect(() => {
-        if (active === null) {
-          setMessages([]);
-          return undefined;
-        }
-        let cancelled = false;
-        getJson(`/dsh-to-qq/api/messages?scene=${encodeURIComponent(active)}&limit=60`)
-          .then(data => {
-            if (!cancelled) setMessages(data.messages ?? []);
-          })
-          .catch(reason => {
-            if (!cancelled) setError(String(reason?.message ?? reason));
-          });
-        return () => {
-          cancelled = true;
-        };
-      }, [active]);
-
-      const scrollStyle = { overflowY: 'auto', maxHeight: 320, display: 'flex', flexDirection: 'column', gap: 6 };
-
-      if (active !== null) {
-        return h('div', { style: { padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 } },
-          h('button', {
-            type: 'button',
-            onClick: () => setActive(null),
-            style: { alignSelf: 'flex-start', border: 'none', background: 'transparent', cursor: 'pointer', color: 'inherit', opacity: 0.7, padding: 0, fontSize: 12 },
-          }, '← 返回'),
-          messages.length === 0
-            ? h('div', { style: { opacity: 0.55 } }, '这个会话还没有记录。')
-            : h('div', { ref: scrollRef, style: scrollStyle },
-              messages.map((entry, index) => {
-                const hasReasoning = typeof entry.reasoning === 'string' && entry.reasoning !== '';
-                const isOpen = expanded === index;
-                const translation = translations[index];
-                return h('div', {
-                  key: `${entry.msg_id}-${index}-${entry.time_bj}`,
-                  onClick: hasReasoning ? () => toggleReasoning(index) : undefined,
-                  style: {
-                    alignSelf: entry.direction === 'out' ? 'flex-end' : 'flex-start',
-                    maxWidth: '88%',
-                    background: entry.direction === 'out' ? 'rgba(77,107,254,.14)' : 'rgba(128,128,128,.14)',
-                    borderRadius: 10,
-                    padding: '6px 9px',
-                    cursor: hasReasoning ? 'pointer' : 'default',
-                  },
-                },
-                h('div', { style: { fontSize: 11, opacity: 0.55, marginBottom: 2 } },
-                  `${entry.direction === 'out' ? 'DSH' : entry.sender_name} · ${String(entry.time_bj).slice(11, 16)}`),
-                h('div', { style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, entry.text),
-                hasReasoning
-                  ? h('div', { style: { fontSize: 11, opacity: 0.6, marginTop: 4 } }, isOpen ? '收起推理 ▲' : '查看推理 ▼')
-                  : null,
-                isOpen
-                  ? h('div', {
-                    style: {
-                      marginTop: 6,
-                      paddingTop: 6,
-                      fontSize: 11,
-                      opacity: 0.75,
-                      borderTop: '1px dashed rgba(128,128,128,.35)',
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                    },
-                  },
-                  translation?.status === 'ok'
-                    ? translation.text
-                    : translation?.status === 'loading'
-                      ? '翻译中…'
-                      : entry.reasoning,
-                  translation?.status === 'error'
-                    ? h('div', { style: { opacity: 0.6, marginTop: 4 } }, `（翻译失败：${translation.text}）`)
-                    : null,
-                  translation?.status === 'unavailable'
-                    ? h('div', { style: { opacity: 0.55, marginTop: 4 } }, `（自动翻译不可用：${translation.note || '无可用翻译路由'}）`)
-                    : null)
-                  : null);
-              })));
-      }
-
-      return h('div', { style: { padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 } },
-        h('div', { style: { fontSize: 12, opacity: 0.7 } },
-          state === null ? '读取状态…' : `连接：${state.transport} · 会话 ${state.scenes.length}`),
-        error === '' ? null : h('div', { style: { color: '#c0392b', fontSize: 12 } }, error),
-        h('div', { style: scrollStyle },
-          (state?.scenes ?? []).map(row => h('button', {
-            key: row.scene,
-            type: 'button',
-            onClick: () => setActive(row.scene),
-            style: {
-              textAlign: 'left', border: 'none', borderRadius: 8, padding: '8px 10px', cursor: 'pointer',
-              background: 'rgba(128,128,128,.10)', color: 'inherit', display: 'flex',
-              flexDirection: 'column', gap: 2, fontSize: 12,
-            },
-          },
-          h('span', { style: { fontWeight: 600 } }, row.name || (String(row.scene).startsWith('group:') ? '群聊' : '私聊')),
-          h('span', { style: { opacity: 0.6 } }, `${row.total} 条 · 最后 ${String(row.lastAt).slice(5, 16)}`)))),
-        state !== null && state.scenes.length === 0
-          ? h('div', { style: { opacity: 0.55, fontSize: 12 } }, '还没有消息记录，先在 QQ 里说句话吧。')
-          : null);
-    };
-
-    /** The panel shell. Docked next to the pet when integrated, anchored to the bubble otherwise. */
-    const PetPanel = props => h('div', {
-      style: {
-        position: props.rect ? 'fixed' : 'absolute',
-        top: props.rect ? props.rect.top : 'auto',
-        left: props.rect ? props.rect.left : props.docked ? 'auto' : 0,
-        right: props.rect ? 'auto' : props.docked ? 0 : 'auto',
-        bottom: props.rect ? 'auto' : props.docked ? 0 : 76,
-        width: 320,
-        maxHeight: 'min(70vh, 460px)',
-        display: props.open ? 'flex' : 'none',
-        flexDirection: 'column',
-        borderRadius: 14,
-        overflow: 'hidden',
-        background: 'var(--dsw-alias-bg-layer-2, #ffffff)',
-        color: 'var(--dsw-alias-label-primary, #1c1f24)',
-        boxShadow: '0 18px 48px rgba(0,0,0,.22)',
-        border: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.18))',
-        fontFamily: 'system-ui, -apple-system, "Microsoft YaHei UI", sans-serif',
-        fontSize: 13,
-        zIndex: 61,
-        transform: props.rect ? (props.entered ? 'translateX(0) scale(1)' : `translateX(${props.fromX ?? 0}px) scale(.96)`) : undefined,
-        opacity: props.rect ? (props.entered ? 1 : 0) : undefined,
-        transition: props.rect
-          ? 'transform 180ms ease-out, opacity 180ms ease-out, left 240ms linear, top 240ms linear'
-          : undefined,
-      },
-    },
-    h('div', {
-      style: {
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '10px 12px', borderBottom: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.14))',
-        fontWeight: 600,
-      },
-    },
-    h('span', null, 'DSH ⇄ QQ'),
-    h('button', {
-      type: 'button',
-      onClick: () => props.onClose(),
-      style: { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 15, lineHeight: 1, color: 'inherit', opacity: 0.6 },
-      'aria-label': 'close',
-    }, '×')),
-    h(PanelBody, { open: props.open }));
-
-    /** Floating companion plus its panel. */
-    const PetOverlay = () => {
-      const initial = React.useRef(readState());
-      const [position, setPosition] = React.useState({ x: initial.current.x, y: initial.current.y });
-      const [open, setOpen] = React.useState(initial.current.open);
-      const [petReady, setPetReady] = React.useState(false);
-      const drag = React.useRef(null);
-
-      React.useEffect(() => {
-        writeState({ x: position.x, y: position.y, open });
-      }, [position, open]);
-
-      React.useEffect(() => {
-        const onResize = () => setPosition(previous => clamp(previous.x, previous.y, 64));
-        window.addEventListener('resize', onResize);
-        return () => window.removeEventListener('resize', onResize);
-      }, []);
-
-      // The desktop pet's right-click menu asks us to open; poll its click count.
-      const lastPetClick = React.useRef(null);
-      React.useEffect(() => {
-        let cancelled = false;
-        const tick = async () => {
-          try {
-            const data = await getJson('/dsh-to-qq/api/state');
-            if (cancelled) return;
-            setPetReady(data.petReady === true);
-            const clicks = Number(data.petClicks ?? 0);
-            if (lastPetClick.current === null) lastPetClick.current = clicks;
-            else if (clicks !== lastPetClick.current) {
-              lastPetClick.current = clicks;
-              setOpen(true);
-            }
-          } catch {
-            // The bridge may be restarting; the next tick retries.
-          }
-        };
-        void tick();
-        const timer = window.setInterval(() => void tick(), 4000);
-        return () => {
-          cancelled = true;
-          window.clearInterval(timer);
-        };
-      }, []);
-
-      const onPointerDown = event => {
-        if (event.button !== 0) return;
-        event.currentTarget.setPointerCapture?.(event.pointerId);
-        drag.current = { startX: event.clientX, startY: event.clientY, originX: position.x, originY: position.y, moved: 0 };
-      };
-
-      const onPointerMove = event => {
-        const current = drag.current;
-        if (current === null) return;
-        const dx = event.clientX - current.startX;
-        const dy = event.clientY - current.startY;
-        current.moved = Math.max(current.moved, Math.abs(dx) + Math.abs(dy));
-        setPosition(clamp(current.originX + dx, current.originY + dy, 64));
-      };
-
-      const onPointerUp = () => {
-        const current = drag.current;
-        drag.current = null;
-        if (current !== null && current.moved < 6) setOpen(value => !value);
-      };
-
-      // Follow the pet: poll its normalized position while the panel is open.
-      const [pose, setPose] = React.useState(null);
-      const [entered, setEntered] = React.useState(false);
-
-      React.useEffect(() => {
-        if (!petReady || !open) return undefined;
-        let cancelled = false;
-        const load = async () => {
-          // An in-page pet is found by DOM; a desktop pet is reported by the host.
-          const anchor = findPetAnchor();
-          if (anchor !== null) {
-            if (!cancelled) setPose({ x: anchor.x, y: anchor.y });
-            return;
-          }
-          try {
-            const data = await getJson('/dsh-to-qq/api/pose');
-            const nx = Number(data?.x);
-            const ny = Number(data?.y);
-            if (!cancelled && Number.isFinite(nx) && Number.isFinite(ny)) {
-              // Normalized screen coordinates -> viewport pixels of this window.
-              const screenWidth = window.screen?.width ?? window.innerWidth;
-              const screenHeight = window.screen?.height ?? window.innerHeight;
-              setPose({
-                x: nx * screenWidth - (window.screenX ?? 0),
-                y: ny * screenHeight - (window.screenY ?? 0),
-              });
-            }
-          } catch {
-            // Keep the previous anchor; the pet may be moving.
-          }
-        };
-        void load();
-        const timer = window.setInterval(() => void load(), 400);
-        return () => {
-          cancelled = true;
-          window.clearInterval(timer);
-        };
-      }, [petReady, open]);
-
-      React.useEffect(() => {
-        if (!petReady || !open) {
-          setEntered(false);
-          return undefined;
-        }
-        setEntered(false);
-        const raf = window.requestAnimationFrame(() => setEntered(true));
-        return () => window.cancelAnimationFrame(raf);
-      }, [petReady, open]);
-
-      // Place the panel beside the pet, on whichever side has room, and never
-      // park it on top of a control: the window buttons and other interactive
-      // elements are probed before a position is accepted.
-      const layout = React.useMemo(() => {
-        const width = window.innerWidth;
-        const height = window.innerHeight;
-        const panelW = 320;
-        const panelH = Math.min(height * 0.7, 460);
-        const px = pose === null ? width - 96 : pose.x;
-        const py = pose === null ? height - 96 : pose.y;
-        const roomRight = width - px;
-        // A pet outside the window pulls the panel to that edge instead of the middle.
-        const toRight = px < 0 || (px <= width && roomRight >= panelW + 56);
-        const clampX = value => Math.min(Math.max(value, 12), width - panelW - 12);
-        const clampY = value => Math.min(Math.max(value, 12), height - panelH - 12);
-        const besideLeft = clampX(toRight ? px + 48 : px - panelW - 48);
-        const besideTop = clampY(py - panelH / 2);
-        const mirroredLeft = clampX(toRight ? px - panelW - 56 : px + 56);
-
-        /**
-         * Whether a position would sit on top of something clickable.
-         *
-         * @param {number} left Candidate left.
-         * @param {number} top Candidate top.
-         * @returns {boolean} True when the spot is taken.
-         */
-        const blocksUi = (left, top) => {
-          // Reserved: the window controls in the top-right corner.
-          if (left + panelW > width - 220 && top < 48) return true;
-          const probes = [
-            [left + 10, top + 10],
-            [left + panelW - 10, top + 10],
-            [left + 10, top + panelH - 10],
-            [left + panelW - 10, top + panelH - 10],
-            [left + panelW / 2, top + 8],
-          ];
-          for (const [x, y] of probes) {
-            if (x < 0 || y < 0 || x >= width || y >= height) continue;
-            const element = document.elementFromPoint(x, y);
-            if (element?.closest('button, a, input, textarea, select, [role="button"], [role="tab"], [role="menuitem"], [role="switch"]') !== null
-              && element?.closest('button, a, input, textarea, select, [role="button"], [role="tab"], [role="menuitem"], [role="switch"]') !== undefined) {
-              return true;
-            }
-          }
-          return false;
-        };
-
-        const candidates = [
-          { left: besideLeft, top: besideTop },
-          { left: besideLeft, top: clampY(64) },
-          { left: besideLeft, top: clampY(height - panelH - 64) },
-          { left: mirroredLeft, top: besideTop },
-          { left: clampX(width - panelW - 16), top: clampY(height - panelH - 64) },
-          { left: clampX(16), top: clampY(64) },
-        ];
-        const chosen = candidates.find(candidate => !blocksUi(candidate.left, candidate.top)) ?? candidates[0];
-        return { left: chosen.left, top: chosen.top, fromX: chosen.left >= px ? -28 : 28 };
-      }, [pose]);
-
-      // With dsh-pet present the pet owns the launcher: no bubble, panel follows it.
-      if (petReady) {
-        if (!open) return null;
-        return h(PetPanel, {
-          open: true,
-          rect: layout,
-          entered,
-          fromX: layout.fromX,
-          onClose: () => setOpen(false),
-        });
-      }
-
-      return h('div', { style: { position: 'fixed', left: position.x, top: position.y, zIndex: 60, width: 64, height: 64 } },
-        h(PetPanel, { open, onClose: () => setOpen(false) }),
-        h('button', {
-          type: 'button',
-          onPointerDown,
-          onPointerMove,
-          onPointerUp,
-          onPointerCancel: onPointerUp,
-          title: 'DSH ⇄ QQ',
-          style: {
-            width: 64, height: 64, borderRadius: '50%', border: 'none', padding: 0,
-            cursor: 'grab', background: 'transparent',
-            filter: 'drop-shadow(0 10px 18px rgba(59,91,219,.35))',
-            animation: 'dsh-to-qq-breathe 3.6s ease-in-out infinite',
-            touchAction: 'none',
-          },
-        }, h(PetStage, { size: 64 })));
-    };
-
     /** Read a dotted path from an object. */
     const getPath = (source, path) => path.split('.').reduce((value, key) => (value == null ? value : value[key]), source);
 
@@ -575,8 +99,6 @@ window.__ModuleLoader__.load({
           { path: 'connection.botUin', label: '机器人 QQ 号（0 = 自动识别）', type: 'number' },
           { path: 'connection.tokenEnv', label: 'token 环境变量名', type: 'text', placeholder: 'QQ_BOT_TOKEN' },
           { path: 'connection.autoStart', label: '自动启动 SnowLuma', type: 'checkbox' },
-          { path: 'ui.pet', label: '与 dsh-pet 联动', type: 'checkbox' },
-          { path: 'ui.petId', label: '宠物 id', type: 'text', placeholder: 'main' },
         ],
       },
       {
@@ -617,31 +139,19 @@ window.__ModuleLoader__.load({
       {
         title: '对话',
         fields: [
-      { path: 'conversation.cwd', label: '会话项目文件夹', type: 'text' },
-      { path: 'conversation.autoRebuildKb', label: '会话重建阈值 (KB)', type: 'number' },
-      { path: 'conversation.archiveOldSessions', label: '重建时隐藏旧会话', type: 'checkbox' },
+          { path: 'conversation.cwd', label: '会话项目文件夹', type: 'text' },
+          { path: 'conversation.autoRebuildKb', label: '会话重建阈值 (KB)', type: 'number' },
+          { path: 'conversation.archiveOldSessions', label: '重建时隐藏旧会话', type: 'checkbox' },
           { path: 'conversation.groupHistory', label: '群聊上文条数', type: 'number' },
           { path: 'conversation.groupCharCap', label: '注入字符上限', type: 'number' },
           { path: 'digest.enabled', label: '每天自动发群日报', type: 'checkbox' },
           { path: 'digest.hour', label: '日报时间 · 时（0-23）', type: 'number' },
           { path: 'digest.minute', label: '日报时间 · 分（0-59）', type: 'number' },
           { path: 'output.imageThreshold', label: '转图阈值（字）', type: 'number' },
-      { path: 'output.maxReplyChars', label: '回复长度上限（字）', type: 'number' },
-      { path: 'output.replyCharsOwner', label: '私聊回复上限 (字)', type: 'number' },
-      { path: 'output.replyCharsGroup', label: '群聊回复上限 (字)', type: 'number' },
-      { path: 'models.searchPrice', label: 'Search 每次 (元)', type: 'number' },
-      { path: 'models.fetchPrice', label: 'Fetch 每次 (元)', type: 'number' },
-          {
-            path: 'output.style',
-            label: '图片样式',
-            type: 'select',
-            options: [
-              { value: 'light', label: '白底黑字' },
-              { value: 'dark', label: '暗色' },
-              { value: 'bubble', label: '仿 QQ 气泡' },
-            ],
-          },
-          { path: 'output.fontSize', label: '字号', type: 'number' },
+          { path: 'output.maxReplyChars', label: '回复长度上限（字）', type: 'number' },
+          { path: 'output.replyCharsOwner', label: '私聊回复上限 (字)', type: 'number' },
+          { path: 'output.replyCharsGroup', label: '群聊回复上限 (字)', type: 'number' },
+          { path: 'output.groupAtReply', label: '群聊回复前 @ 提问的人', type: 'checkbox' },
           { path: 'output.sendTypingStatus', label: '私聊显示「正在输入」', type: 'checkbox' },
         ],
       },
@@ -822,8 +332,6 @@ window.__ModuleLoader__.load({
       'output.style': '图片风格：浅色 / 深色 / 气泡',
       'output.fontSize': '图片字号',
       'output.sendTypingStatus': '回答前显示“正在输入”',
-      'ui.pet': '与 dsh-pet 联动：菜单、气泡、工作状态',
-      'ui.petId': 'dsh-pet 实例 id，一般不用改',
       'voice.enabled': '收到语音时自动转成文字',
       'voice.language': '识别语言，如 zh / en',
       'voice.command': '本地识别命令，{input} {language} 占位；留空不用',
@@ -1728,7 +1236,7 @@ const StickerBoard = () => {
 
     /** Background picker: presets, an uploaded picture, and readability controls. */
     const AppearancePanel = props => {
-      const { config, setConfig, setStatus } = props;
+      const { config, setConfig, setStatus, fieldRow } = props;
       const [uploading, setUploading] = React.useState(false);
       const [uploadError, setUploadError] = React.useState('');
       const fileRef = React.useRef(null);
@@ -1905,6 +1413,20 @@ const StickerBoard = () => {
             }),
             h('span', { style: { width: 42, textAlign: 'right', fontSize: 11, opacity: 0.6, fontVariantNumeric: 'tabular-nums' } }, `${blur}px`)),
           h('div', { style: { ...UI.muted, paddingTop: 4 } }, '遮罩越高文字越清楚；模糊只作用于图片，不影响内容')),
+        h('div', { style: { ...UI.sectionTitle, margin: '12px 0 0' } }, '回复图片'),
+        h('div', { style: { ...UI.card, padding: '10px 16px 12px' } },
+          fieldRow === undefined ? null : fieldRow({
+            path: 'output.style',
+            label: '图片样式',
+            type: 'select',
+            options: [
+              { value: 'light', label: '白底黑字' },
+              { value: 'dark', label: '暗色' },
+              { value: 'bubble', label: '仿 QQ 气泡' },
+            ],
+          }),
+          fieldRow === undefined ? null : fieldRow({ path: 'output.fontSize', label: '字号', type: 'number' }),
+          h('div', { style: { ...UI.muted, paddingTop: 4 } }, '回复超过「对话」页的转图阈值就变成图片，这里决定图片长什么样')),
       );
     };
 
@@ -1919,11 +1441,6 @@ const StickerBoard = () => {
       const [savedJson, setSavedJson] = React.useState('');
       /** Live transport state for the coloured connection pill. */
       const [state, setState] = React.useState(null);
-
-      const applyConfig = next => {
-        setConfig(next);
-        setSavedJson(JSON.stringify(next));
-      };
 
       React.useEffect(() => {
         getJson('/dsh-to-qq/api/config')
@@ -2021,7 +1538,7 @@ const StickerBoard = () => {
           active.group.title === '连接' ? consoleCard : null,
         ].filter(Boolean)
         : active.custom === 'appearance'
-          ? [h(AppearancePanel, { key: 'appearance', config, setConfig, setStatus })]
+          ? [h(AppearancePanel, { key: 'appearance', config, setConfig, setStatus, fieldRow })]
         : active.custom === 'stickers'
           ? [h(StickerBoard, { key: 'stickers' })]
         : active.custom === 'accounts'
@@ -2042,13 +1559,17 @@ const StickerBoard = () => {
                 catalog,
                 onChange: next => setConfig(current => setPath(current, `models.${tier.id}`, next)),
               }))),
-              h('div', { key: 'prices', style: { marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' } },
-                fieldRow({ path: 'models.inputPrice', label: '输入 ¥/M', type: 'number' }),
-                fieldRow({ path: 'models.outputPrice', label: '输出 ¥/M', type: 'number' }),
-                fieldRow({ path: 'models.cachePrice', label: '缓存 ¥/M', type: 'number' })),
+              h('div', { key: 'prices', style: { marginTop: 10 } },
+                h('div', { style: UI.sectionTitle }, '单价与计价'),
+                h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+                  fieldRow({ path: 'models.inputPrice', label: '输入 ¥/M', type: 'number' }),
+                  fieldRow({ path: 'models.outputPrice', label: '输出 ¥/M', type: 'number' }),
+                  fieldRow({ path: 'models.cachePrice', label: '缓存 ¥/M', type: 'number' })),
                 fieldRow({ path: 'models.offPeakDiscount', label: '空闲折扣 (0-1)', type: 'number' }),
                 fieldRow({ path: 'models.peakWindows', label: '高峰时段', type: 'text', placeholder: '09:00-12:00,14:00-18:00' }),
                 fieldRow({ path: 'models.peakHolidays', label: '节假日(YYYY-MM-DD, 逗号)', type: 'text' }),
+                fieldRow({ path: 'models.searchPrice', label: '联网检索每次 (元)', type: 'number' }),
+                fieldRow({ path: 'models.fetchPrice', label: '网页抓取每次 (元)', type: 'number' })),
               h('div', { key: 'permission', style: { marginTop: 6 } },
                 fieldRow({
                   path: 'models.permissionPreset',
@@ -2863,20 +2384,9 @@ const StickerBoard = () => {
     /** Slot entry for the settings surface. */
     const SettingsSection = () => h(SettingsBoundary, null, h(SettingsPage));
 
-    /** Register the overlay and the breathing keyframes. */
+    /** Register the main panel, its sidebar row and the settings section. */
     const apply = ctx => {
-      ctx.effect(() => {
-        if (document.getElementById('dsh-to-qq-keyframes') === null) {
-          const style = document.createElement('style');
-          style.id = 'dsh-to-qq-keyframes';
-          style.textContent = '@keyframes dsh-to-qq-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}';
-          document.head.appendChild(style);
-          return () => style.remove();
-        }
-        return () => {};
-      }, 'dsh-to-qq: keyframes');
-
-      // The conversation lives in the main area now; the floating panel is gone.
+      // The conversation lives in the main area; no floating bubble exists any more.
       ctx.slots.inject('main', () => ctx.slots.register({
         name: 'main',
         key: PANEL_KEY,

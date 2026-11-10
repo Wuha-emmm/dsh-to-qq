@@ -47,7 +47,6 @@ import { registerQqAskTool } from './tools/ask.js';
 import { openArchive } from './archive/db.js';
 import { SceneNames, parseSceneKey } from './bridge/scene-names.js';
 import { AvatarCache } from './web/avatars.js';
-import { PetClient } from './pet/client.js';
 import { Approvals, DANGEROUS_TOOLS } from './policy/approvals.js';
 import { rawSendRefusal } from './policy/raw-send.js';
 
@@ -59,7 +58,7 @@ export const inject = ['tools', 'sessionController', 'webServer'];
  * Keep this in step with package.json — it is what tells a running instance
  * apart from the build that was just installed.
  */
-const VERSION = '0.89.2';
+const VERSION = '0.90.0';
 
 /** Largest backup a browser upload may carry. */
 const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
@@ -590,43 +589,6 @@ export function apply(ctx) {
     return `这一步需要管理员确认：${execution.name}${detail}。请在 QQ 里回复 /yes（3 分钟内只批这一条；/yes! 放开该工具 5 分钟；/全放行 一次放开全部危险工具 5 分钟），然后再让我重试。`;
   }));
 
-  /** Panel opens requested from the pet's right-click menu. */
-  let menuClicks = 0;
-  /** True once the pet accepted our menu entry, so the browser hides its own bubble. */
-  let petReady = false;
-
-  // Optional: talk to dsh-pet when it is installed and running.
-  ctx.effect(() => {
-    const config = store.get();
-    if (config.ui.pet !== true) return () => {};
-    let origin = '';
-    try {
-      origin = ctx.webServer.getOrigin();
-    } catch {
-      return () => {};
-    }
-    const pet = new PetClient({ origin, petId: config.ui.petId || 'main', owner: 'dsh-to-qq', log });
-    bridge.pet = pet;
-    const abort = new AbortController();
-
-    void (async () => {
-      if (!(await pet.available())) {
-        log('dsh-pet is not running; bubbles are disabled');
-        return;
-      }
-      // The conversation moved into a main panel, so the pet no longer offers a menu
-      // entry; only bubbles and work status remain on the pet side.
-      log('dsh-pet is running; bubbles and work status are on');
-    })();
-
-    return () => {
-      abort.abort();
-      petReady = false;
-      bridge.pet = undefined;
-      void pet.releaseLock();
-    };
-  });
-
   // The archive is optional: without `node:sqlite` the bridge still answers.
   ctx.effect(() => {
     /** @type {any} */
@@ -947,8 +909,6 @@ export function apply(ctx) {
           counters: snapshot.counters,
           admins: snapshot.admins,
           groups: config.access.groups,
-          petClicks: menuClicks,
-          petReady,
           scenes,
           appearance: config.appearance,
         });
@@ -1366,11 +1326,6 @@ export function apply(ctx) {
           await memory.save();
         }
         send(200, { ok: true });
-        return;
-      }
-      if (url.pathname === '/dsh-to-qq/api/pose') {
-        const pose = await bridge.pet?.pose();
-        send(200, pose ?? {});
         return;
       }
       if (url.pathname === '/dsh-to-qq/api/messages') {

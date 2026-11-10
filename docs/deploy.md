@@ -137,7 +137,7 @@ powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
 ```
 dsh-to-qq/
 ├─ src/            Host 半边：接入、判权、上下文、记忆、档案、渲染、工具
-├─ client/         Web UI 半边：悬浮宠物、面板、设置页
+├─ client/         Web UI 半边：面板、设置页
 ├─ docs/           设计、部署、配置、排障、路线
 ├─ scripts/        smoke / inventory / rehearse / docs 生成
 ├─ test/           node:test，零依赖

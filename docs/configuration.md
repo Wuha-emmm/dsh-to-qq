@@ -128,6 +128,7 @@
 | `width` | `1080` | `600 ~ 2000` | 转图宽度（像素） |
 | `sendProcessingHint` | `false` | — | 回答前先发一句「收到，正在处理」 |
 | `sendTypingStatus` | `true` | — | 显示 QQ「正在输入」状态 |
+| `groupAtReply` | `true` | — | 群聊回复开头 @ 提问的人，避免多人同时问时分不清对象 |
 
 ## archive
 
@@ -182,13 +183,6 @@
 | `confirmTtlMs` | `180000` | `10000 ~ 600000` | 确认的有效期 |
 | `toolGrantMinutes` | `15` | `1 ~ 120` |  |
 | `audit` | `true` | — | 记录审计事件 |
-
-## ui
-
-| 键 | 默认值 | 范围 | 说明 |
-|---|---|---|---|
-| `pet` | `true` | — | 与 dsh-pet 联动（菜单、气泡、工作状态） |
-| `petId` | `main` | — | dsh-pet 实例 id |
 
 ## appearance
 

@@ -79,7 +79,7 @@ QQ 手机 ──▶ SnowLuma（OneBot 11）──▶ dsh-to-qq Host 插件 ─�
                     └──── 回复/图片/卡片 ◀────┘
 ```
 
-Host 半边负责接入、判权、上下文、记忆、档案与工具；Client 半边在 DSH 的 Web UI 里提供悬浮宠物与会话面板。除了 SnowLuma（QQ 协议端）不引入任何外部服务，也不依赖 `node_modules` 里的运行时包。
+Host 半边负责接入、判权、上下文、记忆、档案与工具；Client 半边在 DSH 的 Web UI 里提供会话面板与设置页。除了 SnowLuma（QQ 协议端）不引入任何外部服务，也不依赖 `node_modules` 里的运行时包。
 
 ## 文档
 
@@ -111,7 +111,7 @@ npm run docs:check # 配置参考是否与默认值一致
 
 ```
 src/       Host 插件（接入、判权、上下文、记忆、档案、渲染、工具）
-client/    Web UI 半边（悬浮宠物、会话面板、设置页）
+client/    Web UI 半边（会话面板、设置页）
 docs/      文档
 scripts/   自检与辅助脚本
 test/      node:test，零依赖
@@ -128,5 +128,5 @@ dev/       开发期辅助 bundle（不随插件发布）
 
 ## 许可
 
-代码 MIT，见 [LICENSE](LICENSE)。宠物动画等第三方素材的授权单独说明，见 [NOTICE.md](NOTICE.md)。
+代码 MIT，见 [LICENSE](LICENSE)。
 

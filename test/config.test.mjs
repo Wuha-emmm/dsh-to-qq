@@ -4,7 +4,7 @@ import { defaults, mergeConfig, normalize, RANGES } from '../src/config/defaults
 
 test('defaults expose every documented section', () => {
   const config = defaults();
-  for (const section of ['connection', 'access', 'models', 'conversation', 'memory', 'limits', 'output', 'archive', 'safety', 'ui', 'appearance']) {
+  for (const section of ['connection', 'access', 'models', 'conversation', 'memory', 'limits', 'output', 'archive', 'safety', 'appearance']) {
     assert.ok(config[section] && typeof config[section] === 'object', `missing section ${section}`);
   }
   assert.equal(config.conversation.groupHistory > 0, true);

@@ -49,6 +49,23 @@ import { toUploadSource, assertOneBotOk } from '../media/outbound-file.js';
 /** How many recent message keys are remembered for de-duplication. */
 const SEEN_LIMIT = 800;
 
+/**
+ * How many speakers may wait their own turn in one scene.
+ *
+ * Past this the newest message joins the last batch, because every extra batch
+ * is another model call and a group burst must not turn into a bill.
+ */
+const MAX_BATCHES_PER_SCENE = 8;
+
+/**
+ * How long a message that arrives mid-turn waits for the scene to free up.
+ *
+ * A follow-up used to be answered with "上一条还在处理" and then dropped. Parking
+ * it instead means it answers right after the running turn; the cap keeps a
+ * stuck turn from holding the scene forever.
+ */
+const SCENE_WAIT_MS = 120_000;
+
 /** Chunk size for one QQ text message. */
 const CHUNK_LIMIT = 1500;
 
@@ -399,12 +416,24 @@ export class Bridge {
     /** Scenes with a turn in flight, so one scene never interleaves two turns. */
     this.busy = new Set();
     /**
-     * Scene -> messages waiting out the human-like pause before a turn starts.
+     * Scenes whose next turn has been claimed but not marked busy yet.
      *
-     * Rapid follow-ups join the same batch instead of being dropped as "busy";
-     * a batch whose scene is still answering stays parked until that turn ends.
+     * Two parked messages can wake at the same moment; whoever claims first wins
+     * and the other keeps waiting.
      *
-     * @type {Map<string, { messages: any[], firstAt: number, timer: any, ready: boolean, promise: Promise<any[]>, resolve: (value: any[]) => void }>}
+     * @type {Set<string>}
+     */
+    this.starting = new Set();
+    /**
+     * Scene -> batches waiting out the human-like pause before a turn starts.
+     *
+     * A person's own rapid follow-ups join one batch instead of being dropped as
+     * "busy"; a different speaker opens another batch, so two people talking at
+     * once each get their own turn and their own name. The queue drains in
+     * arrival order, one turn at a time, and a batch whose scene is still
+     * answering stays parked until that turn ends.
+     *
+     * @type {Map<string, Array<{ senderId: number, messages: any[], firstAt: number, timer: any, ready: boolean, promise: Promise<any[]>, resolve: (value: any[]) => void }>>}
      */
     this.batches = new Map();
     /**
@@ -1324,11 +1353,6 @@ export class Bridge {
     if (batched === undefined) return;
     message = batched;
 
-    if (this.busy.has(message.scene)) {
-      await this.sendText(message, '上一条还在处理，稍等一下。');
-      return;
-    }
-
     if (this.semaphore.pending >= config.limits.queueMax) {
       await this.sendText(message, '排队太长了，过一会儿再来。');
       return;
@@ -1340,7 +1364,16 @@ export class Bridge {
     const release = await this.semaphore.acquire();
     this.quota.record(message, tier);
 
+    // A message that lands mid-turn is parked here instead of being dropped with
+    // "上一条还在处理": it takes the scene the moment the running turn ends.
+    if (await this.#claimScene(message.scene, SCENE_WAIT_MS) !== true) {
+      release();
+      await this.sendText(message, '上一条卡太久了，这条先不接了，等下再问一次。');
+      return;
+    }
+
     this.busy.add(message.scene);
+    this.starting.delete(message.scene);
     // Media belongs to the turn that queued it. Anything still waiting when a
     // new turn starts came from a path that never flushed; letting it ride
     // along here would post an old screenshot next to a fresh answer.
@@ -1359,9 +1392,6 @@ export class Bridge {
     try {
       if (config.output.sendProcessingHint) await this.sendText(message, '收到，正在处理…');
       if (config.output.sendTypingStatus) await this.setTyping(message, true);
-      // Let the desktop pet react, without ever blocking the turn on it.
-      void this.pet?.say(`${message.senderName}：${message.text.slice(0, 40)}`);
-      void this.pet?.workStatus('working', `${message.scene}`);
       if (tier !== 'owner') await this.#maybeBackfill(message);
       const injection = this.#injectionFor(message.scene);
       const card = this.#cardBlock(message, injection);
@@ -1430,7 +1460,7 @@ export class Bridge {
         const savedFiles = [];
         for (const file of files) {
           try {
-            const path = await fetchInboundFile(this.client, file, this.mediaDir, this.log);
+            const path = await fetchInboundFile(this.client, file, this.mediaDir, this.log, { groupId: message.groupId, userId: message.peerId });
             if (path !== undefined) savedFiles.push(path);
           } catch (error) {
             this.log(`file download failed: ${error?.message ?? error}`);
@@ -1578,7 +1608,6 @@ export class Bridge {
           await this.#flushMedia(message, '').catch(error => this.log(`media flush failed: ${error?.message ?? error}`));
           this.log(`suppressed envelope debris for ${message.scene} (${rawBody.length} chars)`);
           turnOk = true;
-          void this.pet?.workStatus('success');
           return;
         }
         rawBody = recovered;
@@ -1588,7 +1617,6 @@ export class Bridge {
         this.counters.answered += 1;
         turnOk = true;
         this.log(`answered ${message.scene} (${tier}) with a card only${rawBody === '' ? '' : `, dropped "${rawBody.slice(0, 40)}"`}`);
-        void this.pet?.workStatus('success');
         return;
       }
       if (rawBody === '') {
@@ -1617,6 +1645,9 @@ export class Bridge {
         .map(value => Number(value) || 0)
         .filter(value => value > 0);
       const replyLimit = limitCandidates.length > 0 ? Math.min(...limitCandidates) : Number.MAX_SAFE_INTEGER;
+      // Long replies become a picture, so an @ prefix would just be dead pixels:
+      // decide on the raw body and only add the mention to text replies.
+      let shown = body;
       const asImage = body.length > replyLimit
         ? await this.sendLongReply(message, body, config, result.reasoning)
         : false;
@@ -1636,26 +1667,30 @@ export class Bridge {
           replyChars = rawBody.length;
           turnOk = true;
           this.log(`answered ${message.scene} (${tier}) with media`);
-          void this.pet?.workStatus('success');
           return;
         }
-        for (const chunk of chunkText(body, CHUNK_LIMIT)) {
+        // Several people can ask in one group between two answers, so the reply
+        // names its target: a real @ when the model did not start with one.
+        const at = message.kind === 'group' && config.output.groupAtReply !== false
+          && !body.startsWith('@')
+          ? `@${message.senderName || message.senderId} `
+          : '';
+        shown = at + body;
+        for (const chunk of chunkText(shown, CHUNK_LIMIT)) {
           await this.sendText(message, chunk, { record: false });
           await sleep(250);
         }
-        this.recordOutbound(message, body, undefined, result.reasoning);
+        this.recordOutbound(message, shown, undefined, result.reasoning);
       }
-      this.#noteDelivery(message.scene, [body]);
+      this.#noteDelivery(message.scene, [shown]);
       this.counters.answered += 1;
-      this.lastReply.set(message.scene, body);
-      replyChars = body.length;
+      this.lastReply.set(message.scene, shown);
+      replyChars = shown.length;
       turnOk = true;
       this.log(`answered ${message.scene} (${tier}) via ${result.sessionId}${asImage ? ' as image' : ''}`);
-      void this.pet?.workStatus('success');
     } catch (error) {
       this.counters.failed += 1;
       this.log(`turn failed for ${message.scene}: ${error?.message ?? error}`);
-      void this.pet?.workStatus('error');
       // The picture was already produced; deliver it rather than dropping it into
       // the next turn, where it would look like a stray screenshot.
       await this.#flushMedia(message, '').catch(flushError => this.log(`media flush failed after error: ${flushError?.message ?? flushError}`));
@@ -1689,18 +1724,19 @@ export class Bridge {
       this.busy.delete(message.scene);
       // Messages that arrived while this turn ran were parked, not dropped.
       this.#fireBatch(message.scene);
-      if (this.busy.size === 0) setTimeout(() => void this.pet?.workStatus('idle'), 4000)?.unref?.();
     }
   }
 
   /**
    * Hold a turn for a human-like beat while follow-up messages collect.
    *
-   * Every message joins its scene's batch. The batch fires once the scene has
-   * been quiet for `replyDelayMs` (+ jitter), and never later than
+   * One person's rapid follow-ups join a single batch: it fires once the scene
+   * has been quiet for `replyDelayMs` (+ jitter), and never later than
    * `batchMaxWaitMs` after its first message, so a fast typist still gets an
-   * answer. A scene that is already answering does not lose the new messages:
-   * the batch parks and resolves when that turn finishes.
+   * answer. Two speakers never share a batch — merging them files the second
+   * question under the first person's name and the model answers only one.
+   * Each speaker's batch waits in arrival order, one turn at a time; a batch
+   * whose scene is still answering stays parked until that turn ends.
    *
    * Only the batch leader continues into the turn; the other callers return
    * `undefined` and are represented by the merged text.
@@ -1711,13 +1747,27 @@ export class Bridge {
    */
   async #collectBatch(message, config) {
     const scene = message.scene;
-    let batch = this.batches.get(scene);
-    if (batch === undefined) {
+    const senderId = Number(message.senderId) || 0;
+    let queue = this.batches.get(scene);
+    if (queue === undefined) {
+      /** @type {any[]} */
+      queue = [];
+      this.batches.set(scene, queue);
+    }
+    let batch = queue[queue.length - 1];
+    // A burst past the cap joins the last batch on purpose: one more turn is one
+    // more model call, and a noisy group must not turn into a bill.
+    const joins = batch !== undefined
+      && (batch.senderId === senderId || queue.length >= MAX_BATCHES_PER_SCENE);
+    if (!joins) {
       /** @type {(value: any[]) => void} */
       let resolve = () => {};
       const promise = new Promise((settle) => { resolve = settle; });
-      batch = { messages: [], firstAt: Date.now(), timer: null, ready: false, promise, resolve };
-      this.batches.set(scene, batch);
+      batch = { senderId, messages: [], firstAt: Date.now(), timer: null, ready: false, promise, resolve };
+      queue.push(batch);
+      // An older batch may have finished waiting while this scene was busy; it
+      // keeps its place at the head of the queue.
+      this.#fireBatch(scene);
     }
     batch.messages.push(message);
 
@@ -1748,19 +1798,48 @@ export class Bridge {
   }
 
   /**
-   * Resolve a ready batch once its scene has no turn in flight.
+   * Resolve the oldest ready batch once its scene has no turn in flight.
    *
    * @param {string} scene The scene key.
    */
   #fireBatch(scene) {
-    const batch = this.batches.get(scene);
-    if (batch === undefined || !batch.ready || this.busy.has(scene)) return;
-    this.batches.delete(scene);
+    const queue = this.batches.get(scene);
+    if (queue === undefined || queue.length === 0 || this.busy.has(scene) || this.starting.has(scene)) return;
+    const batch = queue[0];
+    if (batch.ready !== true) return;
+    queue.shift();
+    if (queue.length === 0) this.batches.delete(scene);
     if (batch.timer !== null) {
       clearTimeout(batch.timer);
       batch.timer = null;
     }
     batch.resolve(batch.messages);
+  }
+
+  /**
+   * Take a scene for the next turn, waiting out the one already running.
+   *
+   * The claim is synchronous once the scene looks free, so two parked messages
+   * waking on the same tick cannot both start: the second sees `starting` and
+   * keeps waiting.
+   *
+   * @param {string} scene The scene key.
+   * @param {number} timeoutMs How long to wait before giving up.
+   * @returns {Promise<boolean>} True once the scene is claimed.
+   */
+  async #claimScene(scene, timeoutMs) {
+    const deadline = Date.now() + Math.max(1000, Number(timeoutMs) || 0);
+    while (true) {
+      if (!this.busy.has(scene) && !this.starting.has(scene)) {
+        this.starting.add(scene);
+        return true;
+      }
+      if (Date.now() >= deadline) return false;
+      await new Promise(resolve => {
+        const timer = setTimeout(resolve, 250);
+        timer.unref?.();
+      });
+    }
   }
 
   /**

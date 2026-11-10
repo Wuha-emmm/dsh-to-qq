@@ -70,6 +70,7 @@ const HINTS = {
   'output.width': '转图宽度（像素）',
   'output.sendProcessingHint': '回答前先发一句「收到，正在处理」',
   'output.sendTypingStatus': '显示 QQ「正在输入」状态',
+  'output.groupAtReply': '群聊回复开头 @ 提问的人，避免多人同时问时分不清对象',
   'stickers.enabled': '向模型提供表情包库并允许发送',
   'stickers.inPrompt': '每次提示里列出多少张表情',
   'stickers.perHourPerScene': '同一个会话每小时最多发几张',
@@ -89,8 +90,6 @@ const HINTS = {
   'safety.confirmTtlMs': '确认的有效期',
   'safety.proactive': '允许主动推送',
   'safety.audit': '记录审计事件',
-  'ui.pet': '与 dsh-pet 联动（菜单、气泡、工作状态）',
-  'ui.petId': 'dsh-pet 实例 id',
   'ui.overlayPosition': '悬浮窗默认位置',
 };
 
