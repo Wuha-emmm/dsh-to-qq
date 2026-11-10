@@ -37,6 +37,7 @@ window.__ModuleLoader__.load({
       sheet.textContent = STYLE_TEXT;
     }
 
+
     /** Fetch JSON from the bridge with the page's own session. */
     const getJson = async path => {
       const response = await fetch(path, { credentials: 'same-origin' });
@@ -1836,6 +1837,7 @@ const StickerBoard = () => {
         setLoading(active !== null);
         stickRef.current = true;
         jumpRef.current = true;
+        savedTopRef.current = 0;
         lastKeyRef.current = '';
         lastCountRef.current = 0;
       }, [active]);
@@ -1855,7 +1857,7 @@ const StickerBoard = () => {
             const newest = next.length === 0 ? undefined : next[next.length - 1];
             const nextKey = newest === undefined ? '' : `${newest.msg_id}@${newest.time_bj}`;
             const previousKey = lastKeyRef.current;
-            if (previousKey !== '' && nextKey !== '' && nextKey !== previousKey) {
+            if (previousKey !== '' && nextKey !== '' && nextKey !== previousKey && !stickRef.current) {
               const added = Math.max(1, next.length - lastCountRef.current);
               setPending(count => count + added);
             }
@@ -1879,20 +1881,27 @@ const StickerBoard = () => {
         };
       }, [active]);
 
-      // Land at the bottom when the thread opens; a new message never moves the reader.
+      // Land at the bottom when the thread opens; while the reader stays at the
+      // bottom every new message keeps the newest line in view.
       React.useEffect(() => {
         const element = scrollRef.current;
         if (element === null || messages.length === 0) return;
-        if (jumpRef.current) {
+        const land = () => {
+          if (!stickRef.current) return;
           element.scrollTop = element.scrollHeight;
+          savedTopRef.current = element.scrollTop;
+        };
+        if (jumpRef.current) {
           stickRef.current = true;
           jumpRef.current = false;
-          savedTopRef.current = element.scrollTop;
+          land();
           return;
         }
         if (stickRef.current) {
-          element.scrollTop = element.scrollHeight;
-          savedTopRef.current = element.scrollTop;
+          land();
+          // Images and media load after this frame and make the thread taller.
+          window.requestAnimationFrame(land);
+          setPending(count => (count === 0 ? count : 0));
           return;
         }
         // Reading history: put the scrollbar back exactly where it was.
@@ -1903,7 +1912,11 @@ const StickerBoard = () => {
         const element = scrollRef.current;
         if (element === null) return;
         savedTopRef.current = element.scrollTop;
-        const near = element.scrollHeight - element.scrollTop - element.clientHeight < 64;
+        const max = element.scrollHeight - element.clientHeight;
+        // No overflow (or the panel has no height yet) means the reader is
+        // already at the bottom; treating that as "scrolled up" is what used
+        // to send the next new message back to the very top.
+        const near = max <= 1 || max - element.scrollTop < 64;
         stickRef.current = near;
         if (near) setPending(count => (count === 0 ? count : 0));
       };
@@ -2292,6 +2305,7 @@ const StickerBoard = () => {
           flex: 1,
           minHeight: 0,
           overflowY: 'auto',
+          overflowAnchor: 'none',
           padding: '18px 20px 24px',
           display: 'flex',
           flexDirection: 'column',
