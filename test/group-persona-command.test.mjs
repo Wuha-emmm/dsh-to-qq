@@ -9,7 +9,7 @@ import { defaults } from '../src/config/defaults.js';
 
 const GROUP_ID = 661526815;
 
-async function harness() {
+async function harness(options = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-to-qq-persona-'));
   const config = defaults();
   config.connection.botUin = 10002;
@@ -20,7 +20,7 @@ async function harness() {
   const memory = new MemoryStore(join(dir, 'memory.json'));
   await memory.load();
   const calls = [];
-  const bridge = new Bridge({ store: { get: () => config }, memory, log: () => {}, stateDir: dir });
+  const bridge = new Bridge({ store: { get: () => config }, memory, log: () => {}, stateDir: dir, driver: options.driver });
   bridge.client = {
     call: async (action, params) => {
       calls.push({ action, params });
@@ -78,7 +78,7 @@ test('an administrator can set, show, and clear the group persona', async () => 
     assert.equal(memory.groupPersona(GROUP_ID).text, '');
     assert.ok(memory.groupPersona(GROUP_ID).clearedAt > 0);
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });
 
@@ -94,7 +94,7 @@ test('a private chat needs the group number', async () => {
     assert.equal(memory.groupPersona(GROUP_ID).text, '私聊里设置');
     assert.equal(config.access.admins.length, 1);
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });
 
@@ -106,6 +106,30 @@ test('a non-administrator cannot change the group persona', async () => {
     assert.match(replyText(calls), /仅管理员可以修改本群默认人设/);
     assert.equal(memory.groupPersona(GROUP_ID), null);
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('the group prompt anchors the current speaker, not the last card', async () => {
+  const prompts = [];
+  const driver = {
+    ask: async args => {
+      prompts.push(String(args.text));
+      return { text: '收到', usage: null };
+    },
+  };
+  const { dir, memory, bridge } = await harness({ driver });
+  try {
+    await memory.setPersona(1813714484, '你是[鱼]，不苟言笑，从语气里分不清情感。');
+    await memory.setGroupPersona(GROUP_ID, '群里说话简短。');
+    await bridge.handle(groupEvent('你好', 10003));
+
+    const prompt = prompts.at(-1) ?? '';
+    assert.match(prompt, /【本轮人设】/);
+    assert.match(prompt, /没有个人人设/);
+    assert.match(prompt, /群里说话简短/);
+    assert.doesNotMatch(prompt, /不苟言笑/);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });

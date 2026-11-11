@@ -2568,6 +2568,33 @@ export class Bridge {
   }
 
   /**
+   * Keep the current speaker's persona next to the question.
+   *
+   * A shared group session keeps every card ever sent, so the nearest card may
+   * belong to the previous speaker. This anchor is deliberately untracked: it
+   * is sent every turn, right above the question, and names the only card that
+   * applies. Without it a member with no card can inherit the previous
+   * speaker's tone (the "面无表情" leak from 胖猫力's card).
+   *
+   * @param {import('./events.js').QQMessage} message The message.
+   * @returns {string} Prompt block, or '' when memory is disabled.
+   */
+  #personaAnchor(message) {
+    if (this.memory === undefined) return '';
+    const own = String(this.memory.get(message.senderId)?.persona?.text ?? '').trim();
+    const who = `${message.senderName}(${message.senderId})`;
+    if (own === '') {
+      return `【本轮人设】${who} 没有个人人设：这一轮只按本群默认风格回答，不要套用上文任何其他人的记忆卡、称呼、口癖或关系。`;
+    }
+    const flat = own.replace(/\s+/g, ' ').trim();
+    const excerpt = flat.length <= 220 ? flat : `${flat.slice(0, 220)}…`;
+    return [
+      `【本轮人设】只按 ${who} 的个人人设回答：${excerpt}`,
+      '（上文其他人的卡一律不适用于这一轮，不要沿用他们的称呼、口癖或性格。）',
+    ].join('\n');
+  }
+
+  /**
    * Prompt text for a private owner chat: the message itself.
    *
    * @param {import('./events.js').QQMessage} message The message.
@@ -2803,7 +2830,8 @@ export class Bridge {
     // out, it is the nearest thing to the turn that needs it. The group persona
     // fills the gap only for speakers who never set a persona of their own.
     const groupPersona = this.#groupPersonaBlock(message, injection);
-    const parts = [header, block, privacy, groupPersona, card, scopeFix, ask].filter(part => part !== '');
+    const personaAnchor = this.#personaAnchor(message);
+    const parts = [header, block, privacy, groupPersona, card, scopeFix, personaAnchor, ask].filter(part => part !== '');
     return parts.join('\n\n');
   }
 
