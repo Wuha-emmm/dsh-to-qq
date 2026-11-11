@@ -8,6 +8,9 @@ test('parseCommand recognizes Chinese and English commands', () => {
   assert.deepEqual(parseCommand('/list'), { name: 'list', arg: '' });
   assert.deepEqual(parseCommand('/新建 项目A'), { name: 'new', arg: '项目A' });
   assert.deepEqual(parseCommand('/记忆卡'), { name: 'card', arg: '' });
+  assert.deepEqual(parseCommand('/群人设 说话简短'), { name: 'group-persona', arg: '说话简短' });
+  assert.deepEqual(parseCommand('/群设 123456789 温柔一点'), { name: 'group-persona', arg: '123456789 温柔一点' });
+  assert.deepEqual(parseCommand('/grouppersona 清空'), { name: 'group-persona', arg: '清空' });
   assert.deepEqual(parseCommand('#sl'), { name: 'status', arg: '' });
   assert.deepEqual(parseCommand(' #SL '), { name: 'status', arg: '' });
 });

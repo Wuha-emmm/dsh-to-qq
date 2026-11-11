@@ -47,6 +47,46 @@ test('MemoryStore persists, reloads, and clears per owner', async () => {
   }
 });
 
+test('MemoryStore keeps one default persona per group through reload and clear', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-to-qq-'));
+  try {
+    const file = join(dir, 'memory.json');
+    const store = new MemoryStore(file);
+    await store.load();
+    assert.equal(store.groupPersona(123456789), null);
+
+    await store.setGroupPersona(123456789, ' 本群说话温柔一点 ', 20002);
+    const entry = store.groupPersona('123456789');
+    assert.equal(entry.text, '本群说话温柔一点');
+    assert.equal(entry.by, 20002);
+    assert.equal(entry.clearedAt, 0);
+
+    const reloaded = new MemoryStore(file);
+    await reloaded.load();
+    assert.equal(reloaded.groupPersona(123456789).text, '本群说话温柔一点');
+
+    const cleared = await reloaded.setGroupPersona(123456789, '', 20002);
+    assert.equal(cleared.text, '');
+    assert.ok(cleared.clearedAt > 0);
+    assert.equal(reloaded.groupPersona(123456789).text, '');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('MemoryStore truncates a group persona to the configured limit', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-to-qq-'));
+  try {
+    const store = new MemoryStore(join(dir, 'memory.json'));
+    await store.load();
+    const entry = await store.setGroupPersona(123456789, '字'.repeat(30), 42, 10);
+    assert.equal(entry.text.length, 10);
+    assert.equal(entry.by, 42);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('renderCard omits an empty card and labels notes and persona', () => {
   assert.equal(renderCard({ card: { notes: [], persona: null }, name: '小明', qq: 1 }), '');
 

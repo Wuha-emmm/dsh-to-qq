@@ -19,6 +19,15 @@ test('each slot is independent', () => {
   assert.equal(tracker.fixed('stickers', '表情'), '');
 });
 
+test('the group persona block is tracked and snapshotted', () => {
+  const tracker = new InjectionTracker();
+  const block = '【本群默认人设】\n说话温柔一点';
+  assert.equal(tracker.fixed('groupPersona', block), block);
+  assert.equal(tracker.fixed('groupPersona', block), '');
+  const saved = tracker.snapshot('session-1').blocks.find(item => item.slot === 'groupPersona');
+  assert.deepEqual(saved, { slot: 'groupPersona', key: '', hash: textHash(block) });
+});
+
 test('a card is tracked per sender, not per scene', () => {
   const tracker = new InjectionTracker();
   assert.equal(tracker.fixed('card', 'A 卡', 11), 'A 卡');

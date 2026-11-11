@@ -4,7 +4,7 @@
 
 > Bridge between QQ and DeepSeek Harness. Owner DMs get full local access; group mentions stay read-only.
 
-`Node ≥ 22` · `MIT` · 零 npm 运行时依赖 · 单测 400 条
+`Node ≥ 22` · `MIT` · 零 npm 运行时依赖 · 单测 411 条
 
 ---
 
@@ -46,6 +46,7 @@ file:///<你的路径>/dsh-to-qq/dist/dsh-to-qq-<版本>.tgz
 | **图片** | 含 GIF，作为附件进对话；转发与引用里的图也会取出 |
 | **合并转发** | 两层展开，40 条 / 4000 字预算 |
 | **记忆** | 按 QQ 号积累人设与印象，跨群跨私聊共用，可出图 |
+| **群人设** | 管理员用 `/群人设` 给本群定默认说话风格；只对没设个人人设的成员生效，个人 `/人设` 优先 |
 | **表情包** | 同步收藏表情、视觉模型结构化识图、可手改，模型自行决定何时发 |
 | **档案** | SQLite 记录谁在何时说了什么，可检索、按天清理 |
 | **日报** | 群日报出图，出图后不再补话 |
@@ -102,7 +103,7 @@ Host 半边负责接入、判权、上下文、记忆、档案与工具；Client
 ## 开发
 
 ```powershell
-npm test           # 400 条单测
+npm test           # 411 条单测
 npm run smoke      # 真调 apply()，抓前置引用/缺服务
 npm run rehearse   # 端到端：解码→判权→上下文→卡片渲染→鉴权
 npm run inventory  # 文件、工具、命令、路由、配置键盘点
@@ -129,4 +130,3 @@ dev/       开发期辅助 bundle（不随插件发布）
 ## 许可
 
 代码 MIT，见 [LICENSE](LICENSE)。
-

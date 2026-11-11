@@ -70,6 +70,8 @@ export class InjectionTracker {
     this.scopeHash = new Map();
     this.stickerHash = '';
     this.rulesHash = '';
+    /** @type {string} Hash of the group-default-persona block. */
+    this.groupPersonaHash = '';
     /** @type {Set<string>} Message signatures already inside the session. */
     this.seen = new Set();
     /** Characters that were not re-sent, for reporting. */
@@ -85,7 +87,7 @@ export class InjectionTracker {
    * per sender (the memory card) do not overwrite each other. Slots with a
    * plain string store behave as before: one hash for the whole scene.
    *
-   * @param {'card' | 'stickers' | 'rules' | 'length'} slot Which fixed block.
+   * @param {'card' | 'stickers' | 'rules' | 'length' | 'groupPersona'} slot Which fixed block.
    * @param {string} block Block text; '' means the block is empty.
    * @param {string | number} [key] Per-entity key, used by map-backed slots.
    * @returns {string} The block to send, or '' when the session already has it.
@@ -166,7 +168,7 @@ export class InjectionTracker {
         for (const [key, hash] of store) blocks.push({ slot, key: String(key), hash });
       }
     }
-    for (const slot of ['rules', 'stickers', 'length', 'scopeFix']) {
+    for (const slot of ['rules', 'stickers', 'length', 'scopeFix', 'groupPersona']) {
       const hash = this[`${slot}Hash`];
       if (typeof hash === 'string' && hash !== '') blocks.push({ slot, key: '', hash });
     }

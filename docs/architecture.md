@@ -68,7 +68,7 @@ Host 插件能在进程内直接调用这些方法（已实测：`list`、`model
 |---|---|
 | `config.json` | 设置页写、Host 监听热应用 |
 | `sessions.json` / `guests.json` | 场景 ↔ DSH 会话绑定 |
-| `memory.json` | 记忆卡 + 运行统计 + 印象冷却 |
+| `memory.json` | 记忆卡（按 QQ）+ 群人设（按群）+ 运行统计 + 印象冷却 |
 | `scene-names.json` | 会话列表的群名 / 昵称缓存（6 小时刷新一次） |
 | `avatars/` | 会话头像（按 `group-<id>.img` / `dm-<id>.img` 落盘，24 小时刷新） |
 | `panel-background.img` | 设置页「外观」上传的对话背景原图（≤ 8 MB） |

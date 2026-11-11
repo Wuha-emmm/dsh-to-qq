@@ -1,6 +1,6 @@
 {
   "name": "dsh-to-qq",
-  "version": "0.90.1",
+  "version": "0.91.0",
   "description": "QQ <-> DeepSeek Harness bridge: chat with your local DSH from a QQ account through SnowLuma/OneBot",
   "type": "module",
   "main": "src/index.js",

@@ -29,6 +29,7 @@ import { renderTextImageBase64 } from '../render/text-image.js';
 import { promptImageParts, persistImage, imageSegments, looksLikeSticker, downloadImage, detectMediaType } from '../media/inbound.js';
 import { describeQuestions, parseReply, extractPending } from './questions.js';
 import { parseCommand, formatSessionList, extractSessions, cleanupCandidates } from './commands.js';
+import { GROUP_PERSONA_USAGE, resolveGroupPersonaTarget, renderGroupPersonaBlock } from './group-persona.js';
 import { voiceSegments, transcribeVoice } from '../media/voice.js';
 import { fetchForwards } from '../media/forward.js';
 import { renderStickerBlock } from '../stickers/catalog.js';
@@ -1028,6 +1029,54 @@ export class Bridge {
         );
         return;
       }
+      case 'group-persona': {
+        if (this.memory === undefined) {
+          await this.sendText(message, '记忆没有启用，改不了群默认人设。');
+          return;
+        }
+        const target = resolveGroupPersonaTarget({
+          arg: command.arg,
+          kind: message.kind,
+          groupId: message.groupId,
+        });
+        if (target.groupId === 0) {
+          await this.sendText(message, GROUP_PERSONA_USAGE);
+          return;
+        }
+        const current = this.memory.groupPersona(target.groupId);
+        if (target.text === '') {
+          if (current === null) {
+            await this.sendText(message, `群 ${target.groupId} 还没有默认人设。\n${GROUP_PERSONA_USAGE}`);
+            return;
+          }
+          if (current.text === '') {
+            await this.sendText(message, `群 ${target.groupId} 的默认人设已经清空了。改：/群人设 内容`);
+            return;
+          }
+          const changed = current.at > 0
+            ? `，${new Date(current.at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })} 修改`
+            : '';
+          await this.sendText(
+            message,
+            `群 ${target.groupId} 的默认人设（${current.text.length} 字${changed}）：\n${current.text}\n\n修改：/群人设 内容；清空：/群人设 清空`,
+          );
+          return;
+        }
+        const clear = target.text === '清空' || target.text.toLowerCase() === 'clear';
+        const raw = clear ? '' : target.text;
+        const limit = Number(this.store.get().memory.personaLimit) || 1000;
+        const entry = await this.memory.setGroupPersona(target.groupId, raw, message.senderId, limit);
+        if (entry.text === '') {
+          await this.sendText(message, `已清除群 ${target.groupId} 的默认人设。`);
+          return;
+        }
+        const truncated = raw.length > entry.text.length ? `（原文 ${raw.length} 字，已截到 ${entry.text.length} 字）` : '';
+        await this.sendText(
+          message,
+          `已设置群 ${target.groupId} 的默认人设（${entry.text.length} 字${truncated}）。只对没有个人人设的成员生效；发送 /群人设 查看，/群人设 清空 清除。`,
+        );
+        return;
+      }
       case 'card': {
         const target = Number(command.arg) || message.senderId;
         const card = this.memory?.get(target);
@@ -1266,12 +1315,22 @@ export class Bridge {
     const tier = tierOf(message, config.access);
 
     // Slash commands run before the model, and before the pause gate. A group
-    // administrator may only reach the status command there: every other name
-    // either writes to the host or rebinds the session.
+    // administrator may only reach the status and group-persona commands there:
+    // every other name either writes to the host or rebinds the session.
     const command = parseCommand(withoutSelfMention(message.text, message.selfId));
-    if (command !== undefined && (tier === 'owner' || (tier === 'owner-group' && command.name === 'status'))) {
-      await this.#runCommand(message, command);
-      return;
+    if (command !== undefined) {
+      const groupCommand = tier === 'owner-group' && (command.name === 'status' || command.name === 'group-persona');
+      if (tier === 'owner' || groupCommand) {
+        await this.#runCommand(message, command);
+        return;
+      }
+      // Only an administrator may touch the group default persona. Drop it here
+      // instead of letting the model answer "/群人设 ..." as ordinary chat.
+      if (command.name === 'group-persona') {
+        this.counters.ignored += 1;
+        await this.sendText(message, '仅管理员可以修改本群默认人设。');
+        return;
+      }
     }
 
     // `/yes` approves the tool the model just tried to run, then the admin retries.
@@ -2485,6 +2544,30 @@ export class Bridge {
   }
 
   /**
+   * Default persona for the group, when the current speaker has none.
+   *
+   * The personal card is authoritative: if this person wrote `/人设`, the group
+   * default stays out of the prompt entirely, so one member's instruction can
+   * never leak into another member's turn.
+   *
+   * @param {import('./events.js').QQMessage} message The message.
+   * @param {InjectionTracker} injection Per-session tracker.
+   * @returns {string} Prompt block, or '' when not applicable.
+   */
+  #groupPersonaBlock(message, injection) {
+    if (this.memory === undefined || message.kind !== 'group') return '';
+    const entry = this.memory.groupPersona(message.groupId);
+    const own = this.memory.get(message.senderId)?.persona?.text ?? '';
+    const block = renderGroupPersonaBlock({
+      text: entry?.text ?? '',
+      hasOwnPersona: own.trim() !== '',
+      clearedAt: entry?.clearedAt ?? 0,
+    });
+    if (block === '') return '';
+    return injection.fixed('groupPersona', block, message.scene);
+  }
+
+  /**
    * Prompt text for a private owner chat: the message itself.
    *
    * @param {import('./events.js').QQMessage} message The message.
@@ -2717,8 +2800,10 @@ export class Bridge {
       `（这轮只跟 ${message.senderName} 说话：称呼、语气按 ${message.senderName}(${message.senderId}) 的记忆卡来，上文别人的卡和摘要里旧的卡都不适用）`,
     ].join('\n');
     // The card sits right above the question: when a new speaker's card does go
-    // out, it is the nearest thing to the turn that needs it.
-    const parts = [header, block, privacy, card, scopeFix, ask].filter(part => part !== '');
+    // out, it is the nearest thing to the turn that needs it. The group persona
+    // fills the gap only for speakers who never set a persona of their own.
+    const groupPersona = this.#groupPersonaBlock(message, injection);
+    const parts = [header, block, privacy, groupPersona, card, scopeFix, ask].filter(part => part !== '');
     return parts.join('\n\n');
   }
 

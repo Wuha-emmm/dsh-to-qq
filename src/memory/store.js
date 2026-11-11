@@ -27,6 +27,14 @@ const MAX_NOTE_CHARS = 240;
  * @property {{ text: string, at: number } | null} persona User-authored style instruction.
  */
 
+/**
+ * @typedef {object} GroupPersona
+ * @property {string} text Default style for one group; '' after a clear.
+ * @property {number} at Unix milliseconds of the last change.
+ * @property {number} by QQ number of the administrator who changed it.
+ * @property {number} clearedAt Unix milliseconds of the last clear, or 0.
+ */
+
 /** Durable store for every card, kept beside the other plugin state. */
 import { filterNotes, sanitizeNote, compileWords } from './sensitive.js';
 
@@ -40,6 +48,12 @@ export class MemoryStore {
     this.privacy = { enabled: true, words: [] };
     /** @type {Map<string, MemoryCard>} */
     this.cards = new Map();
+    /**
+     * Group id -> administrator-authored default persona.
+     *
+     * @type {Map<string, GroupPersona>}
+     */
+    this.groupPersonas = new Map();
     /** Run statistics, kept so a restart does not reset the panel. */
     this.meta = { impressions: {} };
     this.loaded = false;
@@ -54,6 +68,19 @@ export class MemoryStore {
         for (const [qq, card] of Object.entries(parsed)) {
           if (qq === 'meta') {
             this.meta = { impressions: { ...(card?.impressions ?? {}) } };
+            continue;
+          }
+          if (qq === 'groups') {
+            for (const [groupId, value] of Object.entries(card ?? {})) {
+              if (!/^[1-9]\d{3,11}$/.test(groupId)) continue;
+              const text = typeof value?.text === 'string' ? value.text.slice(0, 4000) : '';
+              this.groupPersonas.set(groupId, {
+                text,
+                at: Number(value?.at) || 0,
+                by: Number(value?.by) || 0,
+                clearedAt: Number(value?.clearedAt) || 0,
+              });
+            }
             continue;
           }
           this.cards.set(qq, this.#sanitizeCard(normalizeCard(card)));
@@ -217,6 +244,41 @@ export class MemoryStore {
   }
 
   /**
+   * Read the default persona an administrator set for one group.
+   *
+   * @param {number | string} groupId QQ group number.
+   * @returns {GroupPersona | null} The stored entry, or null when never set.
+   */
+  groupPersona(groupId) {
+    return this.groupPersonas.get(String(groupId)) ?? null;
+  }
+
+  /**
+   * Replace one group's default persona.
+   *
+   * Passing an empty string clears it but keeps the entry, so the bridge can
+   * tell the model that the old block no longer applies.
+   *
+   * @param {number | string} groupId QQ group number.
+   * @param {string} text Persona text; '' clears.
+   * @param {number} [by] Administrator QQ number.
+   * @param {number} [limit] Maximum characters.
+   * @returns {Promise<GroupPersona>} The stored entry.
+   */
+  async setGroupPersona(groupId, text, by = 0, limit = DEFAULT_PERSONA_LIMIT) {
+    const clean = String(text ?? '').trim().slice(0, limit);
+    const entry = {
+      text: clean,
+      at: Date.now(),
+      by: Number(by) || 0,
+      clearedAt: clean === '' ? Date.now() : 0,
+    };
+    this.groupPersonas.set(String(groupId), entry);
+    await this.save();
+    return entry;
+  }
+
+  /**
    * Forget everything about one person.
    *
    * @param {number | string} qq Owner QQ number.
@@ -275,7 +337,11 @@ export class MemoryStore {
 
   /** @returns {Record<string, any>} A plain snapshot. */
   toJSON() {
-    return { ...Object.fromEntries(this.cards), meta: this.meta };
+    return {
+      ...Object.fromEntries(this.cards),
+      groups: Object.fromEntries(this.groupPersonas),
+      meta: this.meta,
+    };
   }
 
   /** Persist every card atomically. */
