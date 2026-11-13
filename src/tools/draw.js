@@ -20,7 +20,7 @@ export function registerQqDrawTool(ctx, options) {
   return ctx.tools.register({
     name: 'qq_draw',
     description:
-      'Draw one picture with the configured image model (火山方舟 Seedream by default) and send it into the current QQ conversation. Use it when someone asks you to make a picture — "画一只鲸鱼娘", "给我张壁纸" — instead of describing what the picture would look like. Generation takes several seconds and costs the account owner money, so only draw when asked. Pass image with a local picture path to edit that picture (图生图) instead of drawing from scratch.',
+      'Draw one picture with the configured image model (火山方舟 Seedream by default) and send it into the current QQ conversation. Use it whenever someone asks for a picture — "生成一张鲸鱼娘在喝奶茶，真人cos", "画个猫", "给我张壁纸" — instead of describing what the picture would look like, and use it for edits too: "修改这张图片，人物换成真人cos" needs no path, because the newest picture in the chat is picked up automatically (pass image only for a file that is not in the conversation). Generation takes several seconds and costs the account owner money, so only draw when asked.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -52,10 +52,14 @@ export function registerQqDrawTool(ctx, options) {
       const prompt = String(args.prompt ?? '').trim();
       if (prompt === '') throw new Error('prompt is empty: say what the picture should show');
 
+      // "把这张换成真人 cos" names no file: the picture they mean is the last one
+      // they sent, and the bridge can find it in the archive by itself.
+      const edit = /(?:修改|改成|换成|替换|把这张|这张图|改一下|修图|转成)/.test(prompt);
       const outcome = await bridge.drawForScene(context.scene, {
         prompt,
         size: String(args.size ?? ''),
         imagePath: String(args.image ?? ''),
+        edit,
       });
       await bridge.sendImageToScene(context.scene, outcome.path, '');
       options.log?.(`qq_draw ${context.scene}: ${outcome.bytes}B in ${outcome.ms}ms`);

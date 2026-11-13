@@ -151,12 +151,20 @@ function mediaKindOf(segments) {
 }
 
 /**
+ * Words that mean "change the picture I already have", not "draw something new".
+ *
+ * They decide whether 图生图 is attempted without an explicit path: the newest
+ * picture in the chat is what the person is pointing at.
+ */
+const EDIT_INTENT = /(?:修改|改成|换成|替换|把这张|这张图|改一下|修图|转成)/;
+
+/**
  * Split a `/画` argument into the prompt and its two optional switches.
  *
  * `/画 一只猫 --size 1536x1024 --model doubao-seedream-5-5-261028`
  *
  * @param {string} [arg] Everything after the command word.
- * @returns {{ prompt: string, size: string, model: string }} The request.
+ * @returns {{ prompt: string, size: string, model: string, edit: boolean }} The request.
  */
 function parseDrawArg(arg = '') {
   const words = [];
@@ -185,7 +193,8 @@ function parseDrawArg(arg = '') {
     }
     words.push(token);
   }
-  return { prompt: words.join(' ').trim(), size: size.trim(), model: model.trim() };
+  const prompt = words.join(' ').trim();
+  return { prompt, size: size.trim(), model: model.trim(), edit: EDIT_INTENT.test(prompt) };
 }
 
 /** Reconnecting bridge between OneBot and DSH sessions. */
@@ -3270,6 +3279,27 @@ export class Bridge {
   }
 
   /**
+   * The newest picture someone sent into this scene, for "改一下这张图".
+   *
+   * People say "把这张换成真人 cos" without attaching anything: the picture is
+   * the one they sent a minute ago. The archive keeps its path, so 图生图 needs
+   * no extra round trip.
+   *
+   * @param {string} scene Scene key such as `dm:123`.
+   * @returns {string} Absolute path, or '' when the scene has no saved picture.
+   */
+  latestInboundImage(scene) {
+    const rows = this.archive?.search?.({ scene, limit: 40 }) ?? [];
+    for (const row of rows) {
+      if ((row.direction ?? 'in') !== 'in') continue;
+      if (row.media_kind !== 'image') continue;
+      const path = String(row.media_path ?? '').split(';')[0].trim();
+      if (path !== '') return path;
+    }
+    return '';
+  }
+
+  /**
    * Draw one picture with the configured image provider and save it locally.
    *
    * The provider answers with a signed URL that expires, so the bytes land in
@@ -3277,7 +3307,7 @@ export class Bridge {
    * review can open the file the archive points at.
    *
    * @param {string} scene Scene key, used for logs only.
-   * @param {{ prompt: string, size?: string, model?: string, imagePath?: string }} request What to draw.
+   * @param {{ prompt: string, size?: string, model?: string, imagePath?: string, edit?: boolean }} request What to draw.
    * @returns {Promise<{ path: string, ms: number, model: string, size: string, bytes: number }>} The file.
    */
   async drawForScene(scene, request) {
@@ -3285,13 +3315,16 @@ export class Bridge {
     const started = Date.now();
     const size = String(request?.size ?? '').trim() || String(config.size ?? '').trim() || '1024x1024';
     const model = String(request?.model ?? '').trim() || String(config.model ?? '').trim();
+    let imagePath = typeof request?.imagePath === 'string' ? request.imagePath.trim() : '';
+    // "改这张图" carries no path: use the newest picture already in the chat.
+    if (imagePath === '' && request?.edit === true) imagePath = this.latestInboundImage(scene);
     const outcome = await generateImage({
       apiKey: String(config.apiKey ?? ''),
       baseUrl: String(config.baseUrl ?? ''),
       model,
       prompt: String(request?.prompt ?? ''),
       size,
-      imagePath: typeof request?.imagePath === 'string' ? request.imagePath : '',
+      imagePath,
       watermark: config.watermark === true,
     });
     const folder = this.mediaDir !== '' ? this.mediaDir : join(tmpdir(), 'dsh-to-qq-draw');
