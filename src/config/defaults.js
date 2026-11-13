@@ -84,6 +84,20 @@ export function defaults() {
       member: { provider: '', model: '', effort: '' },
       summarizer: { provider: '', model: '', effort: '' },
     },
+    image: {
+      /** Only `ark` (火山方舟 Seedream) is wired up so far. */
+      provider: 'ark',
+      /** Ark API key; empty means `/画` explains what is missing instead of drawing. */
+      apiKey: '',
+      /** API root, so a private deployment can point elsewhere. */
+      baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+      /** Model id as listed by `GET /api/v3/models`. */
+      model: 'doubao-seedream-5-0-flash-260915',
+      /** Any size Ark accepts: `1024x1024`, `1536x1024`, `2K`, … */
+      size: '1024x1024',
+      /** Ark adds its own watermark unless this is false. */
+      watermark: false,
+    },
     conversation: {
       /** Workspace directory for sessions created for a QQ scene; empty = DSH default. */
       cwd: '',
@@ -321,14 +335,24 @@ export function normalize(config) {
     if (!allowed.includes(config[section][key])) config[section][key] = allowed[0];
   }
 
+  // The image section is a single provider today; unknown shapes fall back to
+  // the defaults so a hand-edited config cannot crash `/画`.
+  if (config.image === null || typeof config.image !== 'object' || Array.isArray(config.image)) {
+    config.image = defaults().image;
+  }
+  for (const key of ['provider', 'apiKey', 'baseUrl', 'model', 'size']) {
+    if (typeof config.image[key] !== 'string') config.image[key] = defaults().image[key];
+  }
+  if (config.image.provider !== 'ark') config.image.provider = 'ark';
+  if (typeof config.image.watermark !== 'boolean') config.image.watermark = false;
+
   // The background ends up inside a CSS background-image, so only the three
   // shapes this plugin produces are allowed; anything else is discarded.
   if (typeof config.appearance.background !== 'string' || !BACKGROUND_PATTERN.test(config.appearance.background)) {
     config.appearance.background = '';
   }
 
-  if (!Array.isArray(config.access.admins)) config.access.admins = [];
-  config.access.admins = config.access.admins
+  if (!Array.isArray(config.access.admins)) config.access.admins = [];  config.access.admins = config.access.admins
     .filter(entry => entry !== null && typeof entry === 'object' && Number.isInteger(Number(entry.qq)))
     .map(entry => ({ qq: Number(entry.qq), name: String(entry.name ?? ''), addedAt: Number(entry.addedAt ?? 0) }));
   if (!Array.isArray(config.access.groups)) config.access.groups = [];

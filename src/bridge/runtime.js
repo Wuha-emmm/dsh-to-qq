@@ -42,6 +42,7 @@ import { summarizeDigest, formatDigest, dayRange, DIGEST_ROW_LIMIT } from '../di
 import { dueForAutoNote, autoNotePrompt } from '../memory/autonote.js';
 import { summarizeImpressions, backfillImpressions } from './impression-run.js';
 import { isEnvelopeDebris, shouldStaySilent } from './reply.js';
+import { generateImage } from '../image/ark.js';
 import { appendFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -147,6 +148,44 @@ function mediaKindOf(segments) {
     if (segment?.type === 'file') return 'file';
   }
   return undefined;
+}
+
+/**
+ * Split a `/画` argument into the prompt and its two optional switches.
+ *
+ * `/画 一只猫 --size 1536x1024 --model doubao-seedream-5-5-261028`
+ *
+ * @param {string} [arg] Everything after the command word.
+ * @returns {{ prompt: string, size: string, model: string }} The request.
+ */
+function parseDrawArg(arg = '') {
+  const words = [];
+  let size = '';
+  let model = '';
+  const tokens = String(arg ?? '').split(/\s+/).filter(Boolean);
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === '--size' || token === '-s') {
+      size = tokens[index + 1] ?? '';
+      index += 1;
+      continue;
+    }
+    if (token.startsWith('--size=')) {
+      size = token.slice('--size='.length);
+      continue;
+    }
+    if (token === '--model' || token === '-m') {
+      model = tokens[index + 1] ?? '';
+      index += 1;
+      continue;
+    }
+    if (token.startsWith('--model=')) {
+      model = token.slice('--model='.length);
+      continue;
+    }
+    words.push(token);
+  }
+  return { prompt: words.join(' ').trim(), size: size.trim(), model: model.trim() };
 }
 
 /** Reconnecting bridge between OneBot and DSH sessions. */
@@ -946,6 +985,22 @@ export class Bridge {
             ? `已撤回 ${outcome.recalled} 条${outcome.recalled === 0 ? '，接口没给回执' : ''}。`
             : `撤回 ${outcome.recalled} 条，${outcome.failed} 条没撤成（多半是太旧）。`,
         );
+        return;
+      }
+
+      case 'draw': {
+        const request = parseDrawArg(command.arg);
+        if (request.prompt === '') {
+          await this.sendText(message, '要画什么？发 /画 一只戴不锈钢盆的鲸鱼娘');
+          return;
+        }
+        try {
+          const outcome = await this.drawForScene(scene, request);
+          await this.sendImageToScene(scene, outcome.path, `画好了，${(outcome.ms / 1000).toFixed(1)}s`);
+          this.counters.drawn = (this.counters.drawn ?? 0) + 1;
+        } catch (error) {
+          await this.sendText(message, String(error?.message ?? error).slice(0, 200));
+        }
         return;
       }
 
@@ -3212,6 +3267,67 @@ export class Bridge {
       mediaKind,
       reasoning,
     });
+  }
+
+  /**
+   * Draw one picture with the configured image provider and save it locally.
+   *
+   * The provider answers with a signed URL that expires, so the bytes land in
+   * the media directory: `/撤回` can still take back the message, and a later
+   * review can open the file the archive points at.
+   *
+   * @param {string} scene Scene key, used for logs only.
+   * @param {{ prompt: string, size?: string, model?: string, imagePath?: string }} request What to draw.
+   * @returns {Promise<{ path: string, ms: number, model: string, size: string, bytes: number }>} The file.
+   */
+  async drawForScene(scene, request) {
+    const config = this.store.get().image ?? {};
+    const started = Date.now();
+    const size = String(request?.size ?? '').trim() || String(config.size ?? '').trim() || '1024x1024';
+    const model = String(request?.model ?? '').trim() || String(config.model ?? '').trim();
+    const outcome = await generateImage({
+      apiKey: String(config.apiKey ?? ''),
+      baseUrl: String(config.baseUrl ?? ''),
+      model,
+      prompt: String(request?.prompt ?? ''),
+      size,
+      imagePath: typeof request?.imagePath === 'string' ? request.imagePath : '',
+      watermark: config.watermark === true,
+    });
+    const folder = this.mediaDir !== '' ? this.mediaDir : join(tmpdir(), 'dsh-to-qq-draw');
+    await mkdir(folder, { recursive: true });
+    const extension = outcome.mime === 'image/png' ? 'png' : outcome.mime === 'image/webp' ? 'webp' : 'jpeg';
+    const path = join(folder, `draw-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`);
+    await writeFile(path, outcome.bytes);
+    const ms = Date.now() - started;
+    this.log(`drew ${outcome.bytes.length}B in ${ms}ms for ${scene} -> ${path}`);
+    return { path, ms, model, size, bytes: outcome.bytes.length };
+  }
+
+  /**
+   * Post one local picture into a scene, with an optional caption.
+   *
+   * @param {string} scene Scene key such as `group:123` or `dm:456`.
+   * @param {string} path Absolute path of the picture.
+   * @param {string} [caption] Text to put in front of the picture.
+   * @returns {Promise<number>} The OneBot id of the message, or 0.
+   */
+  async sendImageToScene(scene, path, caption = '') {
+    const client = await this.#transport();
+    if (client === undefined) throw new Error('QQ 连接还没起来，图先存着了：' + path);
+    const inGroup = scene.startsWith('group:');
+    const id = Number(scene.slice(scene.indexOf(':') + 1));
+    const segments = [];
+    if (caption !== '') segments.push({ type: 'text', data: { text: caption } });
+    segments.push({ type: 'image', data: { file: toImageSource(path) } });
+    const sent = await client.call(
+      inGroup ? 'send_group_msg' : 'send_private_msg',
+      inGroup ? { group_id: id, message: segments } : { user_id: id, message: segments },
+      { timeoutMs: 120_000 },
+    );
+    const messageId = Number(sent?.message_id ?? sent?.data?.message_id ?? 0) || 0;
+    this.recordSceneOutbound(scene, caption !== '' ? caption : '[图片]', 'image', messageId);
+    return messageId;
   }
 
   /**

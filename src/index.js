@@ -45,6 +45,7 @@ import { registerMemoryCardTool } from './tools/card.js';
 import { registerDigestTool } from './tools/digest.js';
 import { registerQqAskTool } from './tools/ask.js';
 import { registerQqRecallTool } from './tools/recall.js';
+import { registerQqDrawTool } from './tools/draw.js';
 import { openArchive } from './archive/db.js';
 import { SceneNames, parseSceneKey } from './bridge/scene-names.js';
 import { AvatarCache } from './web/avatars.js';
@@ -702,6 +703,9 @@ export function apply(ctx) {
 
   // Taking back a sentence the model should not have said, without a restart.
   ctx.effect(() => registerQqRecallTool(ctx, { bridge, log }));
+
+  // Drawing into the conversation, so "画一只猫" ends with a cat, not a promise.
+  ctx.effect(() => registerQqDrawTool(ctx, { bridge, log }));
 
   // Panel data for the browser half: same origin, so the page's own session applies.
   /** @type {string} */

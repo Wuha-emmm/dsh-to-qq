@@ -157,6 +157,15 @@ window.__ModuleLoader__.load({
         ],
       },
       {
+        title: '出图',
+        fields: [
+          { path: 'image.apiKey', label: '火山方舟 API Key', type: 'text' },
+          { path: 'image.model', label: '出图模型名', type: 'text' },
+          { path: 'image.size', label: '默认尺寸（1024x1024 / 2K）', type: 'text' },
+          { path: 'image.watermark', label: '图片带官方水印', type: 'checkbox' },
+        ],
+      },
+      {
         title: '记忆',
         fields: [
           { path: 'memory.summaryLimit', label: '记忆摘要上限（字）', type: 'number' },
@@ -311,6 +320,10 @@ window.__ModuleLoader__.load({
       'conversation.autoRebuildKb': '会话超过这个大小才自动重建（默认 0 = 不自动重建，改用 /重建）；缓存命中价只有 1/50，重建反而会打断缓存',
       'conversation.groupHistory': '每次回答带上的群消息条数',
       'conversation.groupCharCap': '注入上下文的字数上限',
+      'image.apiKey': '火山方舟的 key，填了 /画 和 qq_draw 才能用',
+      'image.model': '方舟控制台里的 Seedream 模型 id，如 doubao-seedream-5-0-flash-260915',
+      'image.size': '默认出图尺寸，/画 里可以用 --size 覆盖',
+      'image.watermark': '勾上方舟会在图上打自己的水印',
       'digest.enabled': '每天固定时间把群日报图发到群',
       'digest.hour': '北京时间，0–23',
       'digest.minute': '0–59',
