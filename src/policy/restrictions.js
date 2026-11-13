@@ -27,6 +27,7 @@ export const TIER_TOOLS = {
     'memory_persona_set',
     'memory_card_clear',
     'qq_status',
+    'qq_draw',
     'sticker_send',
     'emoji_send',
   ],

@@ -28,6 +28,13 @@ test('guest tiers never see shell or filesystem tools', () => {
   }
 });
 
+test('the administrator can draw in a group, guests cannot', () => {
+  assert.equal(TIER_TOOLS['owner-group'].includes('qq_draw'), true);
+  for (const tier of ['member', 'member-group']) {
+    assert.equal(TIER_TOOLS[tier].includes('qq_draw'), false, `${tier} must not draw`);
+  }
+});
+
 test('the admin loses filesystem tools inside groups', () => {
   for (const forbidden of ['read', 'glob', 'grep', 'read_image', 'pwsh', 'write']) {
     assert.equal(TIER_TOOLS['owner-group'].includes(forbidden), false, `${forbidden} must stay out of groups`);
