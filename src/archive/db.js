@@ -555,7 +555,7 @@ class Archive {
       params.push(`%${query.keyword}%`);
     }
     const limit = Number.isInteger(query.limit) ? Math.min(20_000, Math.max(1, query.limit)) : 20;
-    const sql = `SELECT scene, sender_id, sender_name, time_unix, time_bj, text, msg_id, media_kind, media_path, direction
+    const sql = `SELECT scene, sender_id, sender_name, time_unix, time_bj, text, msg_id, reply_to, media_kind, media_path, direction
                  FROM messages ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
                  ORDER BY time_unix DESC LIMIT ?`;
     return this.db.prepare(sql).all(...params, limit);
@@ -576,7 +576,7 @@ class Archive {
     const id = Number(msgId);
     if (!Number.isFinite(id) || id <= 0) return undefined;
     return this.db.prepare(`
-      SELECT scene, sender_id, sender_name, time_unix, time_bj, text, msg_id, media_kind, media_path, direction
+      SELECT scene, sender_id, sender_name, time_unix, time_bj, text, msg_id, reply_to, media_kind, media_path, direction
       FROM messages
       WHERE scene = ? AND msg_id = ?
       ORDER BY id DESC LIMIT 1

@@ -20,7 +20,7 @@ export function registerQqDrawTool(ctx, options) {
   return ctx.tools.register({
     name: 'qq_draw',
     description:
-      'Draw one picture with the configured image model (火山方舟 Seedream by default) and send it into the current QQ conversation. Use it whenever someone asks for a picture — "生成一张鲸鱼娘在喝奶茶，真人cos", "画个猫", "给我张壁纸" — instead of describing what the picture would look like, and use it for edits too: "修改这张图片，人物换成真人cos" needs no path, because the newest picture in the chat is picked up automatically (pass image only for a file that is not in the conversation). Generation takes several seconds and costs the account owner money, so only draw when asked.',
+      'Draw one picture with the configured image model (火山方舟 Seedream by default) and send it into the current QQ conversation. Use it whenever someone asks for a picture — "生成一张鲸鱼娘在喝奶茶，真人cos", "画个猫", "给我张壁纸" — instead of describing what the picture would look like, and use it for edits too: "修改这张图片，人物换成真人cos" needs no path, because the picture they quoted or sent with the request is used (the newest picture in the chat only when neither exists); pass image for a file that is not in the conversation at all. Generation takes several seconds and costs the account owner money, so only draw when asked.',
     parameters: {
       type: 'object',
       additionalProperties: false,

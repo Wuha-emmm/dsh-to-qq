@@ -101,6 +101,22 @@ test('search returns time_unix and direction for the digest', async () => {
   }
 });
 
+test('a quoted picture stays findable through reply_to', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-to-qq-arch-'));
+  const archive = await openArchive(join(dir, 'q.db'));
+  try {
+    archive.insert(record(31, { mediaKind: 'image', mediaPath: 'C:/media/pic.jpg' }));
+    archive.insert(record(32, { text: '修改这张图片，人物换成真人cos', replyTo: 31 }));
+    const newest = archive.search({ scene: 'group:20001', limit: 1 })[0];
+    assert.equal(Number(newest.reply_to), 31, 'search must carry the reply target');
+    const quoted = archive.byMessageId('group:20001', 31);
+    assert.equal(quoted.media_path, 'C:/media/pic.jpg');
+  } finally {
+    archive.close?.();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
 test('saved media paths are linked to the archived message', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-to-qq-arch-'));
   const archive = await openArchive(join(dir, 'a.db'));

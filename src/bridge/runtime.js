@@ -3300,6 +3300,35 @@ export class Bridge {
   }
 
   /**
+   * Which picture "改一下这张" means: the one quoted or attached, newest last.
+   *
+   * People point at a picture three ways — replying to it (引用), sending it in
+   * the same message as the request, or just meaning "the one I sent before".
+   * Only the last case guesses, and it guesses the newest picture in the scene.
+   *
+   * @param {string} scene Scene key such as `dm:123`.
+   * @returns {string} Absolute path, or '' when the scene has no saved picture.
+   */
+  imageForEdit(scene) {
+    const rows = this.archive?.search?.({ scene, limit: 12 }) ?? [];
+    for (const row of rows) {
+      if ((row.direction ?? 'in') !== 'in') continue;
+      const attached = String(row.media_path ?? '').split(';')[0].trim();
+      if (attached !== '' && row.media_kind === 'image') return attached;
+      const quotedId = Number(row.reply_to ?? 0);
+      if (quotedId > 0) {
+        const quoted = this.archive?.byMessageId?.(scene, quotedId);
+        const path = String(quoted?.media_path ?? '').split(';')[0].trim();
+        if (path !== '') return path;
+      }
+      // Only the newest inbound message speaks for this request: older rows are
+      // context, not a pointer.
+      break;
+    }
+    return this.latestInboundImage(scene);
+  }
+
+  /**
    * Draw one picture with the configured image provider and save it locally.
    *
    * The provider answers with a signed URL that expires, so the bytes land in
@@ -3316,8 +3345,9 @@ export class Bridge {
     const size = String(request?.size ?? '').trim() || String(config.size ?? '').trim() || '1024x1024';
     const model = String(request?.model ?? '').trim() || String(config.model ?? '').trim();
     let imagePath = typeof request?.imagePath === 'string' ? request.imagePath.trim() : '';
-    // "改这张图" carries no path: use the newest picture already in the chat.
-    if (imagePath === '' && request?.edit === true) imagePath = this.latestInboundImage(scene);
+    // "改这张图" carries no path: the quoted or attached picture decides, and
+    // only when neither exists does the newest picture in the chat stand in.
+    if (imagePath === '' && request?.edit === true) imagePath = this.imageForEdit(scene);
     const outcome = await generateImage({
       apiKey: String(config.apiKey ?? ''),
       baseUrl: String(config.baseUrl ?? ''),
