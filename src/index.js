@@ -44,6 +44,7 @@ import { registerQqPathsTool } from './tools/paths.js';
 import { registerMemoryCardTool } from './tools/card.js';
 import { registerDigestTool } from './tools/digest.js';
 import { registerQqAskTool } from './tools/ask.js';
+import { registerQqRecallTool } from './tools/recall.js';
 import { openArchive } from './archive/db.js';
 import { SceneNames, parseSceneKey } from './bridge/scene-names.js';
 import { AvatarCache } from './web/avatars.js';
@@ -400,6 +401,25 @@ export function apply(ctx) {
     memory,
     approvals,
     map,
+    // A rebuild archives the session it replaced so the sidebar does not keep a
+    // dead row, and the startup cleanup archives stale ones through the same
+    // callback. `Runtime` reads this from its own options; the copy handed to
+    // `DshDriver` is never consulted, so the archive step had been a silent
+    // no-op that still logged `archived replaced session`.
+    archiveSession: async (sessionId, options = {}) => {
+      const registry = ctx.get('workspaceRegistry');
+      if (registry === undefined || typeof registry.archiveSession !== 'function') {
+        return { ok: false, error: 'workspace registry unavailable' };
+      }
+      try {
+        const result = await registry.archiveSession(sessionId, { stopActivity: true, ...options });
+        void appendFile(join(stateDir, 'workspace-adopt.log'), `${new Date().toISOString()} archive ${sessionId}: set=${JSON.stringify(registry.archivedSessionIds ?? []).slice(-200)}\n`).catch(() => {});
+        return result === undefined ? { ok: true } : result;
+      } catch (error) {
+        void appendFile(join(stateDir, 'workspace-adopt.log'), `${new Date().toISOString()} archive ${sessionId}: threw ${String(error?.message ?? error).slice(0, 200)}\n`).catch(() => {});
+        throw error;
+      }
+    },
     attachments: ctx.get('attachments'),
     mediaDir: join(stateDir, 'media'),
     stateDir,
@@ -679,6 +699,9 @@ export function apply(ctx) {
 
   // Asking from QQ must not block the turn the way ask_user_question does.
   ctx.effect(() => registerQqAskTool(ctx, { bridge, log }));
+
+  // Taking back a sentence the model should not have said, without a restart.
+  ctx.effect(() => registerQqRecallTool(ctx, { bridge, log }));
 
   // Panel data for the browser half: same origin, so the page's own session applies.
   /** @type {string} */

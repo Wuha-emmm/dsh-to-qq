@@ -911,13 +911,40 @@ export class Bridge {
         return;
       }
       case 'rebuild': {
-        const outcome = await this.rebuildScene(scene, { reason: 'command' });
-        this.sessionChoices.delete(scene);
+        // `/重建 群号` names another scene: an administrator rebuilding a group
+        // from their private chat used to rebuild the private chat and leave the
+        // group in its old session.
+        const target = await this.#rebuildTarget(message, command.arg);
+        if (target === undefined) {
+          await this.sendText(message, `没这个会话：${command.arg}。发 /重建 重建当前这个，/重建 群号 重建那个群。`);
+          return;
+        }
+        const outcome = await this.rebuildScene(target, { reason: 'command' });
+        this.sessionChoices.delete(target);
+        const where = target === scene
+          ? '会话'
+          : `会话 ${target.startsWith('group:') ? `群 ${target.slice(6)}` : target.slice(3)}`;
         await this.sendText(
           message,
           outcome.recapChars === 0
-            ? '已重建会话，之前的记录没有可续接的消息，下一条会开新会话。'
-            : `已重建会话：带走最近 ${outcome.messages} 条消息作为摘要（${outcome.recapChars} 字），下一条消息自动接上。`,
+            ? `已重建${where}，之前的记录没有可续接的消息，下一条会开新会话。`
+            : `已重建${where}：带走最近 ${outcome.messages} 条消息作为摘要（${outcome.recapChars} 字），下一条消息自动接上。`,
+        );
+        return;
+      }
+
+      case 'recall': {
+        const count = Number(command.arg);
+        const outcome = await this.recallLast(scene, Number.isInteger(count) && count > 0 ? count : 1);
+        if (outcome.recalled === 0 && outcome.failed === 0) {
+          await this.sendText(message, '这里没有我发过的消息能撤。');
+          return;
+        }
+        await this.sendText(
+          message,
+          outcome.failed === 0
+            ? `已撤回 ${outcome.recalled} 条${outcome.recalled === 0 ? '，接口没给回执' : ''}。`
+            : `撤回 ${outcome.recalled} 条，${outcome.failed} 条没撤成（多半是太旧）。`,
         );
         return;
       }
@@ -1315,11 +1342,18 @@ export class Bridge {
     const tier = tierOf(message, config.access);
 
     // Slash commands run before the model, and before the pause gate. A group
-    // administrator may only reach the status and group-persona commands there:
-    // every other name either writes to the host or rebinds the session.
+    // administrator may only reach the status, group-persona, rebuild and recall
+    // commands there: every other name either writes to the host or rebinds the
+    // session. `/重建` is included because a group's own session is the one it
+    // needs to replace, and a group message is the only place that scene names
+    // itself; `/撤回` only ever takes back the bot's own last message.
     const command = parseCommand(withoutSelfMention(message.text, message.selfId));
     if (command !== undefined) {
-      const groupCommand = tier === 'owner-group' && (command.name === 'status' || command.name === 'group-persona');
+      const groupCommand = tier === 'owner-group'
+        && (command.name === 'status'
+          || command.name === 'group-persona'
+          || command.name === 'rebuild'
+          || command.name === 'recall');
       if (tier === 'owner' || groupCommand) {
         await this.#runCommand(message, command);
         return;
@@ -2052,6 +2086,39 @@ export class Bridge {
     }
     if (archived > 0) this.log(`archived ${archived} stale sessions`);
     return { keepHours, bound: bound.length, candidates, archived, failed, dry: false };
+  }
+
+  /**
+   * Resolve the scene a `/重建` argument names.
+   *
+   * No argument rebuilds the chat the command was typed in. A bare QQ number is
+   * read as a group, because rebuilding a group from a private chat is the only
+   * way an administrator reaches a group session that has no command of its own.
+   * A candidate is accepted only when the bridge already knows it, so a typo
+   * cannot park a rebuild mark on a scene that will never speak.
+   *
+   * @param {any} message The inbound message.
+   * @param {string} arg The command argument.
+   * @returns {Promise<string | undefined>} Scene to rebuild, or undefined.
+   */
+  async #rebuildTarget(message, arg) {
+    const text = String(arg ?? '').trim();
+    if (text === '' || /^(当前|这里|本群|this|current)$/i.test(text)) return message.scene;
+    const candidates = [];
+    const bare = /^(?:群|群号|group)?[:：\s]*(\d{5,12})$/i.exec(text);
+    if (bare !== null) candidates.push(`group:${bare[1]}`);
+    const dm = /^(?:私聊|单聊|dm)[:：\s]*(\d{5,12})$/i.exec(text);
+    if (dm !== null) candidates.push(`dm:${dm[1]}`);
+    if (/^(group|dm):\d{5,12}$/i.test(text)) candidates.push(text.toLowerCase());
+    for (const scene of candidates) {
+      if (typeof this.map?.get?.(scene) === 'string') return scene;
+      try {
+        if ((this.archive?.search?.({ scene, limit: 1 }) ?? []).length > 0) return scene;
+      } catch {
+        // An unreadable archive only means the binding must exist to qualify.
+      }
+    }
+    return undefined;
   }
 
   async rebuildScene(scene, options = {}) {
@@ -3145,6 +3212,41 @@ export class Bridge {
       mediaKind,
       reasoning,
     });
+  }
+
+  /**
+   * Recall the bridge's own most recent messages in one scene.
+   *
+   * SnowLuma never echoes our own sends, so the archive's outbound rows are the
+   * only durable record of what we posted and under which OneBot id. Newest
+   * first, capped at ten: a bulk recall is a mistake waiting to happen.
+   *
+   * @param {string} scene Scene key such as `group:123`.
+   * @param {number} [count] How many of our newest messages to take back.
+   * @returns {Promise<{ recalled: number, failed: number, ids: number[] }>} Outcome.
+   */
+  async recallLast(scene, count = 1) {
+    const client = await this.#transport();
+    if (client === undefined) throw new Error('the QQ transport is not connected');
+    const want = Math.min(10, Math.max(1, Number(count) || 1));
+    const rows = this.archive?.search?.({ scene, limit: 80 }) ?? [];
+    const ids = rows
+      .filter(row => (row.direction ?? 'in') === 'out' && Number(row.msg_id) > 0)
+      .slice(0, want)
+      .map(row => Number(row.msg_id));
+    let recalled = 0;
+    let failed = 0;
+    for (const id of ids) {
+      try {
+        await client.call('delete_msg', { message_id: id }, { timeoutMs: 8000 });
+        recalled += 1;
+      } catch (error) {
+        failed += 1;
+        this.log(`recall ${id} failed: ${error?.message ?? error}`);
+      }
+    }
+    if (recalled > 0) this.log(`recalled ${recalled} message(s) in ${scene}`);
+    return { recalled, failed, ids };
   }
 
   /**
