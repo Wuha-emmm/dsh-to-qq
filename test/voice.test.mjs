@@ -49,3 +49,35 @@ test('the administrator can speak, guests cannot', () => {
   assert.ok(!TIER_TOOLS.member.includes('qq_voice'));
   assert.ok(!TIER_TOOLS['member-group'].includes('qq_voice'));
 });
+
+import { speechify } from '../src/speech/style.js';
+
+test('markup is stripped, never read out loud', () => {
+  const spoken = speechify('**好的**，看 `E:\\out.txt` 这个文件\n- 第一行\n- 第二行');
+  assert.ok(!spoken.includes('*'));
+  assert.ok(!spoken.includes('`'));
+  assert.ok(!spoken.includes('- '));
+  assert.ok(spoken.includes('E:\\out.txt'));
+});
+
+test('a long sentence gets a breath in the middle', () => {
+  const spoken = speechify('这台机器的显卡是五零七零十二个G显存跑量化版模型其实还算够用但是别指望跑满血版本');
+  assert.ok(spoken.length > 26);
+  assert.ok((spoken.match(/，/g) ?? []).length >= 1);
+});
+
+test('a sentence without punctuation still ends like a sentence', () => {
+  assert.ok(speechify('你好').endsWith('。'));
+  assert.ok(speechify('你在干嘛').endsWith('。'));
+});
+
+test('tone bends only the closing punctuation', () => {
+  assert.ok(speechify('好', { tone: '开心' }).endsWith('！'));
+  assert.ok(speechify('好', { tone: '难过' }).endsWith('…'));
+  assert.ok(speechify('好', { tone: '随便' }).endsWith('。'));
+});
+
+test('empty or markup-only text has nothing to say', () => {
+  assert.equal(speechify(''), '');
+  assert.equal(speechify('```\ncode only\n```'), '');
+});

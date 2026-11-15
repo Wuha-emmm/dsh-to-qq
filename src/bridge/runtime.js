@@ -19,6 +19,7 @@ import { buildHints } from '../context/hints.js';
 import { TIER_TOOLS } from '../policy/restrictions.js';
 import { toImageSource } from '../tools/send.js';
 import { synthesizeSpeech } from '../speech/tts.js';
+import { speechify } from '../speech/style.js';
 import { admit, blockedWord, tierOf, withoutSelfMention } from '../policy/tiers.js';
 import { Quota, Semaphore } from '../policy/quota.js';
 import { looksLikeApproval } from '../policy/approvals.js';
@@ -3402,18 +3403,20 @@ export class Bridge {
    * something to retry with instead of a lost sentence.
    *
    * @param {string} scene Scene key, used for logs only.
-   * @param {{ text: string, voiceId?: string }} request What to say.
+   * @param {{ text: string, voiceId?: string, tone?: string }} request What to say.
    * @returns {Promise<{ path: string, ms: number, bytes: number, voiceId: string }>} The file.
    */
   async speakForScene(scene, request) {
     const config = this.store.get().speech ?? {};
     const started = Date.now();
+    const spoken = speechify(String(request?.text ?? ''), { tone: String(request?.tone ?? '') });
+    if (spoken === '') throw new Error('要念什么？给我一句能念的话。');
     const outcome = await synthesizeSpeech({
       apiKey: String(config.apiKey ?? ''),
       baseUrl: String(config.baseUrl ?? ''),
       voiceId: String(request?.voiceId ?? '').trim() || String(config.voiceId ?? ''),
       format: String(config.format ?? ''),
-      text: String(request?.text ?? ''),
+      text: spoken,
     });
     const folder = this.mediaDir !== '' ? this.mediaDir : join(tmpdir(), 'dsh-to-qq-voice');
     await mkdir(folder, { recursive: true });

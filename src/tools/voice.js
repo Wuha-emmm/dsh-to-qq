@@ -23,12 +23,16 @@ export function registerQqVoiceTool(ctx, options) {
   return ctx.tools.register({
     name: 'qq_voice',
     description:
-      'Say something out loud as a QQ voice message (a 语音条, not text). Use it whenever the person asks to hear it — 「念一句…」「发语音」「用语音回复我」「读给我听」「念一下这段」— instead of writing the words in chat; no slash command is involved. Pass the exact line to speak in text: when they ask you to read your own reply, put that reply here. Keep it conversational and short (one to three sentences); long paragraphs are slow to synthesize and nobody listens to them. Each call costs the account owner money, so do not use it unasked and do not send both the text and the voice unless the person asked for both.',
+      'Say something out loud as a QQ voice message (a 语音条, not text). Use it whenever the person asks to hear it — 「念一句…」「发语音」「用语音回复我」「读给我听」「念一下这段」— instead of writing the words in chat; no slash command is involved. Pass the exact line to speak in text: when they ask you to read your own reply, put that reply here. Write it the way it should sound — short spoken clauses, real punctuation, 语气词 — because the engine has no emotion setting and the words are the only lever; the bridge strips Markdown, splits long sentences and shapes the closing punctuation for you, so do not add stage directions like "（小声）". Keep it to one to three sentences; long paragraphs are slow to synthesize and nobody listens to them. Each call costs the account owner money, so do not use it unasked and do not send both the text and the voice unless the person asked for both.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         text: { type: 'string', description: 'The exact words to speak, in the language the person used.' },
+        tone: {
+          type: 'string',
+          description: 'Optional delivery hint: 开心 / 难过 / 生气 (or cheer, sad, angry). Only bends the closing punctuation; leave it out to keep the tone the words already carry.',
+        },
         voice_id: {
           type: 'string',
           description: 'Optional voice: stella (female, default) or tide (male). Defaults to the configured one.',
@@ -53,6 +57,7 @@ export function registerQqVoiceTool(ctx, options) {
 
       const outcome = await bridge.speakForScene(context.scene, {
         text,
+        tone: String(args.tone ?? ''),
         voiceId: String(args.voice_id ?? ''),
       });
       await bridge.sendVoiceToScene(context.scene, outcome.path);
