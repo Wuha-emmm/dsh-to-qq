@@ -98,6 +98,18 @@ export function defaults() {
       /** Ark adds its own watermark unless this is false. */
       watermark: false,
     },
+    speech: {
+      /** Only `deepseek` (api.deepseek.com/v1/tools/tts) is wired up so far. */
+      provider: 'deepseek',
+      /** DeepSeek API key; empty means the voice tool explains what is missing. */
+      apiKey: '',
+      /** API root, so a private deployment can point elsewhere. */
+      baseUrl: 'https://api.deepseek.com',
+      /** `stella` (海星, female) or `tide` (暗潮, male). */
+      voiceId: 'stella',
+      /** `wav` is what QQ converts to silk most reliably. */
+      format: 'wav',
+    },
     conversation: {
       /** Workspace directory for sessions created for a QQ scene; empty = DSH default. */
       cwd: '',
@@ -345,6 +357,18 @@ export function normalize(config) {
   }
   if (config.image.provider !== 'ark') config.image.provider = 'ark';
   if (typeof config.image.watermark !== 'boolean') config.image.watermark = false;
+
+  // The speech section holds one API key and two enums; a hand-edited config
+  // must not be able to make the voice tool throw before it can explain itself.
+  if (config.speech === null || typeof config.speech !== 'object' || Array.isArray(config.speech)) {
+    config.speech = defaults().speech;
+  }
+  for (const key of ['provider', 'apiKey', 'baseUrl', 'voiceId', 'format']) {
+    if (typeof config.speech[key] !== 'string') config.speech[key] = defaults().speech[key];
+  }
+  if (config.speech.provider !== 'deepseek') config.speech.provider = 'deepseek';
+  if (config.speech.format !== 'pcm') config.speech.format = 'wav';
+  if (!['stella', 'tide'].includes(config.speech.voiceId)) config.speech.voiceId = 'stella';
 
   // The background ends up inside a CSS background-image, so only the three
   // shapes this plugin produces are allowed; anything else is discarded.

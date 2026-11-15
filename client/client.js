@@ -166,6 +166,14 @@ window.__ModuleLoader__.load({
         ],
       },
       {
+        title: '语音',
+        fields: [
+          { path: 'speech.apiKey', label: 'DeepSeek API Key（sk-）', type: 'text' },
+          { path: 'speech.voiceId', label: '音色（stella 女 / tide 男）', type: 'text' },
+          { path: 'speech.baseUrl', label: '接口地址', type: 'text' },
+        ],
+      },
+      {
         title: '记忆',
         fields: [
           { path: 'memory.summaryLimit', label: '记忆摘要上限（字）', type: 'number' },
@@ -324,6 +332,9 @@ window.__ModuleLoader__.load({
       'image.model': '方舟控制台里的 Seedream 模型 id，如 doubao-seedream-5-0-flash-260915',
       'image.size': '默认出图尺寸，/画 里可以用 --size 覆盖',
       'image.watermark': '勾上方舟会在图上打自己的水印',
+  'speech.apiKey': 'DeepSeek 平台的 API key（sk- 开头），TTS 用；登录态不认',
+  'speech.voiceId': 'stella 女声（默认），tide 男声',
+  'speech.baseUrl': '默认 https://api.deepseek.com，走中转才改',
       'digest.enabled': '每天固定时间把群日报图发到群',
       'digest.hour': '北京时间，0–23',
       'digest.minute': '0–59',

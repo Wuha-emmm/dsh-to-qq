@@ -46,6 +46,7 @@ import { registerDigestTool } from './tools/digest.js';
 import { registerQqAskTool } from './tools/ask.js';
 import { registerQqRecallTool } from './tools/recall.js';
 import { registerQqDrawTool } from './tools/draw.js';
+import { registerQqVoiceTool } from './tools/voice.js';
 import { openArchive } from './archive/db.js';
 import { SceneNames, parseSceneKey } from './bridge/scene-names.js';
 import { AvatarCache } from './web/avatars.js';
@@ -706,6 +707,7 @@ export function apply(ctx) {
 
   // Drawing into the conversation, so "画一只猫" ends with a cat, not a promise.
   ctx.effect(() => registerQqDrawTool(ctx, { bridge, log }));
+  ctx.effect(() => registerQqVoiceTool(ctx, { bridge, log }));
 
   // Panel data for the browser half: same origin, so the page's own session applies.
   /** @type {string} */

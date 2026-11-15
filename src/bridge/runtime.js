@@ -18,6 +18,7 @@ import { compressPayload, disposeUploadCopy } from '../media/compress.js';
 import { buildHints } from '../context/hints.js';
 import { TIER_TOOLS } from '../policy/restrictions.js';
 import { toImageSource } from '../tools/send.js';
+import { synthesizeSpeech } from '../speech/tts.js';
 import { admit, blockedWord, tierOf, withoutSelfMention } from '../policy/tiers.js';
 import { Quota, Semaphore } from '../policy/quota.js';
 import { looksLikeApproval } from '../policy/approvals.js';
@@ -3390,6 +3391,62 @@ export class Bridge {
     );
     const messageId = Number(sent?.message_id ?? sent?.data?.message_id ?? 0) || 0;
     this.recordSceneOutbound(scene, caption !== '' ? caption : '[图片]', 'image', messageId);
+    return messageId;
+  }
+
+  /**
+   * Say one line aloud: synthesize it with the configured speech provider and
+   * save the audio in the media directory.
+   *
+   * The file lands on disk before anything is sent, so a broken transport leaves
+   * something to retry with instead of a lost sentence.
+   *
+   * @param {string} scene Scene key, used for logs only.
+   * @param {{ text: string, voiceId?: string }} request What to say.
+   * @returns {Promise<{ path: string, ms: number, bytes: number, voiceId: string }>} The file.
+   */
+  async speakForScene(scene, request) {
+    const config = this.store.get().speech ?? {};
+    const started = Date.now();
+    const outcome = await synthesizeSpeech({
+      apiKey: String(config.apiKey ?? ''),
+      baseUrl: String(config.baseUrl ?? ''),
+      voiceId: String(request?.voiceId ?? '').trim() || String(config.voiceId ?? ''),
+      format: String(config.format ?? ''),
+      text: String(request?.text ?? ''),
+    });
+    const folder = this.mediaDir !== '' ? this.mediaDir : join(tmpdir(), 'dsh-to-qq-voice');
+    await mkdir(folder, { recursive: true });
+    const path = join(folder, `voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${outcome.extension}`);
+    await writeFile(path, outcome.bytes);
+    const ms = Date.now() - started;
+    this.log(`spoke ${outcome.bytes.length}B in ${ms}ms for ${scene} -> ${path}`);
+    return { path, ms, bytes: outcome.bytes.length, voiceId: outcome.voiceId };
+  }
+
+  /**
+   * Post one local audio file into a scene as a voice message.
+   *
+   * SnowLuma converts what it receives into silk before upload, so the bridge
+   * only has to hand over a file it can read.
+   *
+   * @param {string} scene Scene key such as `group:123` or `dm:456`.
+   * @param {string} path Absolute path of the audio file.
+   * @returns {Promise<number>} The OneBot id of the message, or 0.
+   */
+  async sendVoiceToScene(scene, path) {
+    const client = await this.#transport();
+    if (client === undefined) throw new Error('QQ 连接还没起来，语音先存着了：' + path);
+    const inGroup = scene.startsWith('group:');
+    const id = Number(scene.slice(scene.indexOf(':') + 1));
+    const segments = [{ type: 'record', data: { file: toImageSource(path) } }];
+    const sent = await client.call(
+      inGroup ? 'send_group_msg' : 'send_private_msg',
+      inGroup ? { group_id: id, message: segments } : { user_id: id, message: segments },
+      { timeoutMs: 120_000 },
+    );
+    const messageId = Number(sent?.message_id ?? sent?.data?.message_id ?? 0) || 0;
+    this.recordSceneOutbound(scene, '[语音]', 'record', messageId);
     return messageId;
   }
 
