@@ -19,7 +19,9 @@ import { buildHints } from '../context/hints.js';
 import { TIER_TOOLS } from '../policy/restrictions.js';
 import { toImageSource } from '../tools/send.js';
 import { synthesizeSpeech } from '../speech/tts.js';
+import { LocalVoice } from '../speech/local.js';
 import { speechify } from '../speech/style.js';
+import { emotionInstruction } from '../speech/emotion.js';
 import { admit, blockedWord, tierOf, withoutSelfMention } from '../policy/tiers.js';
 import { Quota, Semaphore } from '../policy/quota.js';
 import { looksLikeApproval } from '../policy/approvals.js';
@@ -47,7 +49,7 @@ import { isEnvelopeDebris, shouldStaySilent } from './reply.js';
 import { generateImage } from '../image/ark.js';
 import { appendFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { toUploadSource, assertOneBotOk } from '../media/outbound-file.js';
 
 /** How many recent message keys are remembered for de-duplication. */
@@ -458,6 +460,11 @@ export class Bridge {
     /** The scene -> session mapping, used by `/切换` and `/新建`. */
     this.map = options.map;
     this.log = options.log ?? (() => {});
+    /**
+     * Her own voice, when the switch in `speech.local` is on. The module owns
+     * the queue process, so turning the switch off really does stop it.
+     */
+    this.localVoice = new LocalVoice({ store: this.store, log: this.log });
     /** @type {OneBotClient | undefined} */
     this.client = undefined;
     /** @type {string[]} */
@@ -617,6 +624,9 @@ export class Bridge {
     this.client?.stop();
     this.client = undefined;
     this.state = 'stopped';
+    // The local voice queue outlives the transport, so it is stopped explicitly:
+    // nothing here should keep a GPU after the plugin unloads.
+    void this.localVoice?.dispose().catch(error => this.log(`local voice stop failed: ${error.message}`));
   }
 
   /** @returns {object} A snapshot for the status tool. */
@@ -3396,35 +3406,111 @@ export class Bridge {
   }
 
   /**
+   * Post one local file into a scene.
+   *
+   * OneBot does not read a bare Windows path: the bytes go inline as
+   * `base64://`, and the envelope is checked so a refusal is reported instead
+   * of looking like a delivery.
+   *
+   * @param {string} scene Scene key such as `group:123` or `dm:456`.
+   * @param {string} path Absolute path of the file.
+   * @param {string} [name] File name shown in the chat.
+   * @returns {Promise<number>} The OneBot id of the message, or 0.
+   */
+  async sendFileToScene(scene, path, name = '') {
+    const client = await this.#transport();
+    if (client === undefined) throw new Error('QQ 连接还没起来，文件先存着了：' + path);
+    const inGroup = scene.startsWith('group:');
+    const id = Number(scene.slice(scene.indexOf(':') + 1));
+    const fileName = name !== '' ? name : basename(path);
+    const source = await toUploadSource(path);
+    const action = inGroup ? 'upload_group_file' : 'upload_private_file';
+    const sent = await client.call(
+      action,
+      inGroup ? { group_id: id, file: source, name: fileName } : { user_id: id, file: source, name: fileName },
+      { timeoutMs: 180_000 },
+    );
+    assertOneBotOk(sent, action);
+    const messageId = Number(sent?.message_id ?? sent?.data?.message_id ?? 0) || 0;
+    this.recordSceneOutbound(scene, `[文件] ${fileName}`, 'file', messageId);
+    return messageId;
+  }
+
+  /**
    * Say one line aloud: synthesize it with the configured speech provider and
    * save the audio in the media directory.
+   *
+   * Her own voice goes first when the switch is on; the hosted DeepSeek voice is
+   * the fallback, so a missing engine, a cold-start timeout or a failed job
+   * degrades to the old voice instead of going silent.
    *
    * The file lands on disk before anything is sent, so a broken transport leaves
    * something to retry with instead of a lost sentence.
    *
    * @param {string} scene Scene key, used for logs only.
-   * @param {{ text: string, voiceId?: string, tone?: string }} request What to say.
-   * @returns {Promise<{ path: string, ms: number, bytes: number, voiceId: string }>} The file.
+   * @param {{ text: string, voiceId?: string, tone?: string, style?: string }} request What to say.
+   * @returns {Promise<{ path: string, ms: number, bytes: number, voiceId: string, provider: string, note: string }>} The file.
    */
   async speakForScene(scene, request) {
     const config = this.store.get().speech ?? {};
     const started = Date.now();
     const spoken = speechify(String(request?.text ?? ''), { tone: String(request?.tone ?? '') });
     if (spoken === '') throw new Error('要念什么？给我一句能念的话。');
-    const outcome = await synthesizeSpeech({
+    const instruct = emotionInstruction(String(request?.emotion ?? ''));
+    const folder = this.mediaDir !== '' ? this.mediaDir : join(tmpdir(), 'dsh-to-qq-voice');
+    await mkdir(folder, { recursive: true });
+    const hosted = async () => synthesizeSpeech({
       apiKey: String(config.apiKey ?? ''),
       baseUrl: String(config.baseUrl ?? ''),
       voiceId: String(request?.voiceId ?? '').trim() || String(config.voiceId ?? ''),
       format: String(config.format ?? ''),
       text: spoken,
     });
-    const folder = this.mediaDir !== '' ? this.mediaDir : join(tmpdir(), 'dsh-to-qq-voice');
-    await mkdir(folder, { recursive: true });
+
+    let note = '';
+    if (this.localVoice?.enabled() === true) {
+      try {
+        await this.localVoice.ensure();
+        const capabilities = await this.localVoice.capabilities();
+        if (capabilities.tts === true) {
+          const audio = await this.localVoice.synthesize(spoken, { style: String(request?.style ?? ''), instruct });
+          const path = join(folder, `voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.wav`);
+          await writeFile(path, audio.bytes);
+          const ms = Date.now() - started;
+          this.log(`spoke ${audio.bytes.length}B in ${ms}ms for ${scene} -> ${path} (feiyu tts${instruct === '' ? '' : ', instruct'})`);
+          return { path, ms, bytes: audio.bytes.length, voiceId: 'feiyu', provider: 'feiyu-tts', note: '' };
+        }
+        if (capabilities.rvc === true) {
+          // Only the converter is installed: keep the hosted prosody and move the
+          // timbre, which is the cheap half of the effect and half the disk.
+          const source = await hosted();
+          const audio = await this.localVoice.convert(source.bytes);
+          const path = join(folder, `voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.wav`);
+          await writeFile(path, audio.bytes);
+          const ms = Date.now() - started;
+          this.log(`spoke ${audio.bytes.length}B in ${ms}ms for ${scene} -> ${path} (feiyu rvc)`);
+          return {
+            path,
+            ms,
+            bytes: audio.bytes.length,
+            voiceId: 'feiyu',
+            provider: 'feiyu-rvc',
+            note: '本地只装了 RVC：语气是原声的，音色换成了肥鱼。',
+          };
+        }
+        note = '本地声音服务在跑，但里面没装引擎（TTS/RVC 都不可用），这次用原声念的。';
+      } catch (error) {
+        note = `本地声音这次没成功（${error.message}），用原声念的。`;
+        this.log(`local voice failed, falling back to the hosted voice: ${error.message}`);
+      }
+    }
+
+    const outcome = await hosted();
     const path = join(folder, `voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${outcome.extension}`);
     await writeFile(path, outcome.bytes);
     const ms = Date.now() - started;
     this.log(`spoke ${outcome.bytes.length}B in ${ms}ms for ${scene} -> ${path}`);
-    return { path, ms, bytes: outcome.bytes.length, voiceId: outcome.voiceId };
+    return { path, ms, bytes: outcome.bytes.length, voiceId: outcome.voiceId, provider: 'deepseek', note };
   }
 
   /**

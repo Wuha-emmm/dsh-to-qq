@@ -64,6 +64,48 @@
 | `summarizer.model` | `""`（空） | — | 翻译与印象整理的模型 |
 | `summarizer.effort` | `""`（空） | — | 翻译与印象整理的推理级别 |
 
+## image
+
+| 键 | 默认值 | 范围 | 说明 |
+|---|---|---|---|
+| `provider` | `ark` | — |  |
+| `apiKey` | `""`（空） | — |  |
+| `baseUrl` | `https://ark.cn-beijing.volces.com/api/v3` | — |  |
+| `model` | `doubao-seedream-5-0-flash-260915` | — |  |
+| `size` | `1024x1024` | — |  |
+| `watermark` | `false` | — |  |
+
+## speech
+
+| 键 | 默认值 | 范围 | 说明 |
+|---|---|---|---|
+| `provider` | `deepseek` | — | 语音合成服务商；目前只接了 deepseek |
+| `apiKey` | `""`（空） | — | DeepSeek API Key（sk- 开头），用于原声 TTS |
+| `baseUrl` | `https://api.deepseek.com` | — | DeepSeek 接口根地址 |
+| `voiceId` | `stella` | — | 原声音色：stella（女）/ tide（男） |
+| `format` | `wav` | — | 音频格式：wav（QQ 转 silk 最稳） |
+| `local.enabled` | `false` | — | 本地肥鱼声音总开关；关 = 不启动任何进程、不占显存，全部回落原声 |
+| `local.warm` | `true` | — | 常驻预热：模型留在显存里，每句约 0.2 秒（约 1.5–2 GB 显存）；关掉改成每句起进程（约 10 秒） |
+| `local.root` | `""`（空） | — | 本地声音安装目录（含 server/、envs/、models/），例如 E:\feiyu |
+| `local.serverRoot` | `""`（空） | — | 服务代码目录；留空 = <root>/server |
+| `local.pythonPath` | `""`（空） | — | 跑队列的 Python；留空 = <root>/envs/service/Scripts/python.exe |
+| `local.warmPython` | `""`（空） | — | 常驻进程用的 Python（要装 torch）；留空 = <root>/envs/rvc/Scripts/python.exe |
+| `local.warmPackage` | `""`（空） | — | RVC 权重包目录；留空 = <root>/models/FeiyuVoice-RVC |
+| `local.ttsWarm` | `true` | — | 用肥鱼自己的 CosyVoice3 声音说话：每句 1–3 秒，另占约 3.5 GB 显存；关掉 = 回落 DeepSeek 原声 |
+| `local.ttsPython` | `""`（空） | — | TTS 常驻进程用的 Python；留空 = <root>/envs/tts/Scripts/python.exe |
+| `local.ttsModel` | `""`（空） | — | CosyVoice3 权重包；留空 = <root>/models/FeiyuVoice-CosyVoice3 |
+| `local.ttsProfile` | `""`（空） | — | CosyVoice 运行档案；留空 = <root>/server/configs/runtime.tts.cuda.local.json |
+| `local.ttsServer` | `""`（空） | — | TTS 常驻进程要用的服务代码；留空 = <root>/server |
+| `local.baseUrl` | `http://127.0.0.1:9880` | — | 本地服务地址（只绑 127.0.0.1） |
+| `local.apiKey` | `""`（空） | — | 本地服务 Bearer；留空 = 读 <server>/.runtime/voice-service/api_key.txt |
+| `local.style` | `cute` | — | 肥鱼参考音色：cute（可爱）/ gentle（温柔） |
+| `local.autoStart` | `true` | — | 第一次发语音时自动拉起服务 |
+| `local.idleStopMinutes` | `15` | — | 多少分钟没有语音就退出服务（0 = 常驻） |
+| `local.jobTimeoutMs` | `180000` | — | 单条推理超时；冷启动要重新加载 6 GB 权重 |
+| `local.coverTimeoutMs` | `1800000` | — | 整首翻唱的超时（分离 + 换声 + 混音，一首歌要几分钟） |
+| `local.startTimeoutMs` | `60000` | — | 拉起服务后等 /health 的时间 |
+| `local.pathPrefix` | `""`（空） | — | 给子进程补的 PATH（验证运行时需要 git） |
+
 ## conversation
 
 | 键 | 默认值 | 范围 | 说明 |

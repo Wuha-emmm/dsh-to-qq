@@ -29,6 +29,8 @@ export const TIER_TOOLS = {
     'qq_status',
     'qq_draw',
     'qq_voice',
+    'qq_voice_service',
+    'qq_cover',
     'sticker_send',
     'emoji_send',
   ],

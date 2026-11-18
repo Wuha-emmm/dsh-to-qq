@@ -47,6 +47,8 @@ import { registerQqAskTool } from './tools/ask.js';
 import { registerQqRecallTool } from './tools/recall.js';
 import { registerQqDrawTool } from './tools/draw.js';
 import { registerQqVoiceTool } from './tools/voice.js';
+import { registerQqVoiceServiceTool } from './tools/voice-service.js';
+import { registerQqCoverTool } from './tools/cover.js';
 import { openArchive } from './archive/db.js';
 import { SceneNames, parseSceneKey } from './bridge/scene-names.js';
 import { AvatarCache } from './web/avatars.js';
@@ -708,6 +710,8 @@ export function apply(ctx) {
   // Drawing into the conversation, so "画一只猫" ends with a cat, not a promise.
   ctx.effect(() => registerQqDrawTool(ctx, { bridge, log }));
   ctx.effect(() => registerQqVoiceTool(ctx, { bridge, log }));
+  ctx.effect(() => registerQqVoiceServiceTool(ctx, { bridge, log }));
+  ctx.effect(() => registerQqCoverTool(ctx, { bridge, log }));
 
   // Panel data for the browser half: same origin, so the page's own session applies.
   /** @type {string} */
@@ -1605,10 +1609,15 @@ export function apply(ctx) {
       })
       .catch(error => log(`config load failed: ${error.message}`));
     store.watch();
-    const unsubscribe = store.onChange(() => {
+    const unsubscribe = store.onChange(config => {
       log('configuration changed; restarting transport');
       applyMemoryPrivacy();
       bridge.start();
+      // Turning the switch off has to actually stop the queue: an idle service
+      // still holds RAM, and a queued job still holds the GPU.
+      if (config?.speech?.local?.enabled !== true) {
+        void bridge.localVoice?.stop().catch(error => log(`local voice stop failed: ${error.message}`));
+      }
     });
     return () => {
       unsubscribe();

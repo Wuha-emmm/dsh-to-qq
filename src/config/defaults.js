@@ -109,6 +109,68 @@ export function defaults() {
       voiceId: 'stella',
       /** `wav` is what QQ converts to silk most reliably. */
       format: 'wav',
+      /**
+       * Her own voice, installed on this machine.
+       *
+       * Off by default: the local engine is a separate 15–25 GB installation
+       * (see docs/feiyu-voice.md). With the switch off nothing is spawned and
+       * `qq_voice` uses the hosted DeepSeek voice above.
+       */
+      local: {
+        /** The master switch. False = the local service is never started. */
+        enabled: false,
+        /**
+         * Keep one engine process resident instead of one per sentence.
+         *
+         * Warm costs about 1.5–2 GB of VRAM while it runs and turns a ten-second
+         * sentence into about a fifth of a second; switching off (or stopping the
+         * worker) is what releases the memory again.
+         */
+        warm: true,
+        /** Installation directory holding `server/`, `envs/` and `models/`. */
+        root: '',
+        /** Service checkout; empty = `<root>/server`. */
+        serverRoot: '',
+        /** Queue Python; empty = `<root>/envs/service/Scripts/python.exe`. */
+        pythonPath: '',
+        /** Torch Python for the resident worker; empty = `<root>/envs/rvc/Scripts/python.exe`. */
+        warmPython: '',
+        /** RVC release package; empty = `<root>/models/FeiyuVoice-RVC`. */
+        warmPackage: '',
+        /**
+         * Speak with her own CosyVoice3 voice through a resident worker.
+         *
+         * Costs about 3.5 GB of VRAM while it runs and speaks a sentence in
+         * roughly one to three seconds; off = `qq_voice` falls back to the
+         * hosted DeepSeek voice (optionally with RVC on top).
+         */
+        ttsWarm: true,
+        /** TTS Python; empty = `<root>/envs/tts/Scripts/python.exe`. */
+        ttsPython: '',
+        /** CosyVoice package; empty = `<root>/models/FeiyuVoice-CosyVoice3`. */
+        ttsModel: '',
+        /** Runtime profile; empty = `<root>/server/configs/runtime.tts.cuda.local.json`. */
+        ttsProfile: '',
+        /** Voice-service checkout for the TTS worker; empty = `<root>/server`. */
+        ttsServer: '',
+        /** Where the service listens (it binds 127.0.0.1 only). */
+        baseUrl: 'http://127.0.0.1:9880',
+        /** Bearer token; empty = read `<server>/.runtime/voice-service/api_key.txt`. */
+        apiKey: '',
+        /** `cute` (可爱) or `gentle` (温柔) — the two reference voices. */
+        style: 'cute',
+        /** Start the service on the first voice message. */
+        autoStart: true,
+        /** Stop it after this many quiet minutes; 0 = keep running. */
+        idleStopMinutes: 15,
+        /** One job's budget: a cold start loads 6 GB of weights. */
+        jobTimeoutMs: 180000,
+        coverTimeoutMs: 1800000,
+        /** Patience for `/health` after spawning. */
+        startTimeoutMs: 60000,
+        /** Extra PATH entries for the child (git is needed to verify the runtime). */
+        pathPrefix: '',
+      },
     },
     conversation: {
       /** Workspace directory for sessions created for a QQ scene; empty = DSH default. */
@@ -297,6 +359,20 @@ export const RANGES = {
 };
 
 /**
+ * Coerce a value into a whole number inside a range.
+ *
+ * @param {unknown} value Raw input.
+ * @param {number} min Lower bound.
+ * @param {number} max Upper bound.
+ * @param {number} fallback Value when the input is not a number.
+ * @returns {number} The clamped integer.
+ */
+function wholeNumber(value, min, max, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, Math.round(number))) : fallback;
+}
+
+/**
  * Deep-merge a stored config over the defaults, keeping only known keys.
  *
  * @param {unknown} stored Parsed JSON from config.json, or anything else.
@@ -369,6 +445,43 @@ export function normalize(config) {
   if (config.speech.provider !== 'deepseek') config.speech.provider = 'deepseek';
   if (config.speech.format !== 'pcm') config.speech.format = 'wav';
   if (!['stella', 'tide'].includes(config.speech.voiceId)) config.speech.voiceId = 'stella';
+
+  // The local voice switch sits one level deeper than mergeConfig reaches, so
+  // every field is rebuilt from the defaults before any type check. A config
+  // that only knows two of these keys must still produce a complete object.
+  const localDefaults = defaults().speech.local;
+  const storedLocal = config.speech.local;
+  const local = { ...localDefaults };
+  if (storedLocal !== null && typeof storedLocal === 'object' && !Array.isArray(storedLocal)) {
+    for (const key of Object.keys(localDefaults)) {
+      if (Object.hasOwn(storedLocal, key) && storedLocal[key] !== undefined) local[key] = storedLocal[key];
+    }
+  }
+  for (const key of [
+    'root',
+    'serverRoot',
+    'pythonPath',
+    'warmPython',
+    'warmPackage',
+    'ttsPython',
+    'ttsModel',
+    'ttsProfile',
+    'ttsServer',
+    'baseUrl',
+    'apiKey',
+    'pathPrefix',
+  ]) {
+    if (typeof local[key] !== 'string') local[key] = localDefaults[key];
+  }
+  for (const key of ['enabled', 'warm', 'ttsWarm', 'autoStart']) {
+    if (typeof local[key] !== 'boolean') local[key] = localDefaults[key];
+  }
+  if (!['cute', 'gentle'].includes(local.style)) local.style = localDefaults.style;
+  local.idleStopMinutes = wholeNumber(local.idleStopMinutes, 0, 1440, localDefaults.idleStopMinutes);
+  local.jobTimeoutMs = wholeNumber(local.jobTimeoutMs, 60_000, 1_800_000, localDefaults.jobTimeoutMs);
+  local.coverTimeoutMs = wholeNumber(local.coverTimeoutMs, 60_000, 3_600_000, localDefaults.coverTimeoutMs);
+  local.startTimeoutMs = wholeNumber(local.startTimeoutMs, 5_000, 600_000, localDefaults.startTimeoutMs);
+  config.speech.local = local;
 
   // The background ends up inside a CSS background-image, so only the three
   // shapes this plugin produces are allowed; anything else is discarded.

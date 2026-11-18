@@ -23,7 +23,7 @@ export function registerQqVoiceTool(ctx, options) {
   return ctx.tools.register({
     name: 'qq_voice',
     description:
-      'Say something out loud as a QQ voice message (a 语音条, not text). Use it whenever the person asks to hear it — 「念一句…」「发语音」「用语音回复我」「读给我听」「念一下这段」— instead of writing the words in chat; no slash command is involved. Pass the exact line to speak in text: when they ask you to read your own reply, put that reply here. Write it the way it should sound — short spoken clauses, real punctuation, 语气词 — because the engine has no emotion setting and the words are the only lever; the bridge strips Markdown, splits long sentences and shapes the closing punctuation for you, so do not add stage directions like "（小声）". Keep it to one to three sentences; long paragraphs are slow to synthesize and nobody listens to them. Each call costs the account owner money, so do not use it unasked and do not send both the text and the voice unless the person asked for both.',
+      'Say something out loud as a QQ voice message (a 语音条, not text). Use it whenever the person asks to hear it — 「念一句…」「发语音」「用语音回复我」「读给我听」「念一下这段」— instead of writing the words in chat; no slash command is involved. Pass the exact line to speak in text: when they ask you to read your own reply, put that reply here. Write it the way it should sound — short spoken clauses, real punctuation, 语气词 — because the engine has no emotion setting and the words are the only lever; the bridge strips Markdown, splits long sentences and shapes the closing punctuation for you, so do not add stage directions like "（小声）". Keep it to one to three sentences; long paragraphs are slow to synthesize and nobody listens to them. The voice may come from this machine (the Feiyu engine, when the local voice switch is on — slower, but no per-sentence bill) or from the hosted DeepSeek voice, which costs the account owner money; either way do not use it unasked and do not send both the text and the voice unless the person asked for both.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -35,7 +35,21 @@ export function registerQqVoiceTool(ctx, options) {
         },
         voice_id: {
           type: 'string',
-          description: 'Optional voice: stella (female, default) or tide (male). Defaults to the configured one.',
+          description: 'Optional voice: stella (female, default) or tide (male). Defaults to the configured one. Only used when her local voice is not available.',
+        },
+        style: {
+          type: 'string',
+          enum: ['cute', 'gentle'],
+          description: 'Optional local voice style: cute (可爱) or gentle (温柔). Defaults to the configured one; ignored by the hosted voice.',
+        },
+        emotion: {
+          type: 'string',
+          enum: [
+            'happy', 'excited', 'angry', 'sad', 'crying', 'coquettish', 'shy', 'scared',
+            'tired', 'teasing', 'contempt', 'serious', 'sigh',
+            'soft', 'loud', 'slow', 'fast', 'sichuan', 'cantonese', 'northeast',
+          ],
+          description: 'Optional emotion for the local Feiyu voice: happy 开心, excited 兴奋, angry 生气, sad 委屈/难过, crying 哭腔, coquettish 撒娇, shy 害羞, scared 害怕, tired 累, teasing 调侃/挑衅, contempt 不屑, serious 严肃, sigh 叹气, soft 轻声, loud 大声, slow 慢, fast 快, sichuan 四川话, cantonese 广东话, northeast 东北话. Only the local CosyVoice3 voice honours it.',
         },
       },
       required: ['text'],
@@ -59,13 +73,21 @@ export function registerQqVoiceTool(ctx, options) {
         text,
         tone: String(args.tone ?? ''),
         voiceId: String(args.voice_id ?? ''),
+        style: String(args.style ?? ''),
+        emotion: String(args.emotion ?? ''),
       });
       await bridge.sendVoiceToScene(context.scene, outcome.path);
-      options.log?.(`qq_voice ${context.scene}: ${outcome.bytes}B in ${outcome.ms}ms`);
+      options.log?.(`qq_voice ${context.scene}: ${outcome.bytes}B in ${outcome.ms}ms via ${outcome.provider}`);
+      const voice = outcome.provider === 'feiyu-tts'
+        ? '肥鱼（她自己的声音）'
+        : outcome.provider === 'feiyu-rvc'
+          ? '肥鱼（原声 + RVC 变声）'
+          : '原声（DeepSeek）';
       return {
-        report: `念完了，${(outcome.ms / 1000).toFixed(1)}s，语音条已发。文件：${outcome.path}`,
+        report: `念完了，${(outcome.ms / 1000).toFixed(1)}s，${voice}，语音条已发。文件：${outcome.path}${outcome.note === '' ? '' : `\n${outcome.note}`}`,
         path: outcome.path,
         voiceId: outcome.voiceId,
+        provider: outcome.provider,
         ms: outcome.ms,
       };
     },

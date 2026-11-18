@@ -171,6 +171,33 @@ window.__ModuleLoader__.load({
           { path: 'speech.apiKey', label: 'DeepSeek API Key（sk-）', type: 'text' },
           { path: 'speech.voiceId', label: '音色（stella 女 / tide 男）', type: 'text' },
           { path: 'speech.baseUrl', label: '接口地址', type: 'text' },
+          {
+            path: 'speech.local.enabled',
+            label: '启用本地肥鱼声音（关掉就不用 GPU，自动回落原声）',
+            type: 'checkbox',
+          },
+          { path: 'speech.local.root', label: '本地声音安装目录（如 E:\\feiyu）', type: 'text' },
+          {
+            path: 'speech.local.warm',
+            label: '常驻预热（每句 0.2 秒，但占约 1.5–2 GB 显存；关掉=每句约 10 秒）',
+            type: 'checkbox',
+          },
+          {
+            path: 'speech.local.ttsWarm',
+            label: '本地 TTS：用肥鱼自己的声音（每句 1–3 秒，另占约 3.5 GB 显存；关掉=回落 DeepSeek 原声）',
+            type: 'checkbox',
+          },
+          {
+            path: 'speech.local.style',
+            label: '肥鱼音色风格',
+            type: 'select',
+            options: [
+              { value: 'cute', label: 'cute 可爱' },
+              { value: 'gentle', label: 'gentle 温柔' },
+            ],
+          },
+          { path: 'speech.local.idleStopMinutes', label: '没语音多少分钟后退出（0=一直常驻）', type: 'number' },
+          { path: 'speech.local.autoStart', label: '第一次发语音时自动启动服务', type: 'checkbox' },
         ],
       },
       {

@@ -2,6 +2,15 @@
 
 只记「改了什么」，一句话一条。
 
+## 0.95.x
+- **0.95.6** `qq_cover` 可以直接吃 B 站链接或 BV 号：插件自己用 yt-dlp 下音轨（顺带下 1080p 画面），裸的 `BV1…` 也认；带 `video: true` 就用 ffmpeg 把画面拼回去、转成 720p H.264 再发出来，全程不碰 shell 工具、不用审批。桥也补上发文件通道 `sendFileToScene`（群里走 group 上传动作、私聊走 private 上传动作，字节内联成 `base64://`，接口回错会当真报错，不再假装发成功）
+- **0.95.5** 修翻唱里她的声音被伴奏压住：RVC 换完音色会比原唱低 5 dB 左右（实测 -23.7 vs -18.7 dBFS），以前直接叠加，整首听下来伴奏盖过人声。现在混音前按原人声的 RMS 把换声结果拉回来（最多 +12 dB），日志里会写 `matching vocal level: x1.78 (+5.0 dB)`
+- **0.95.4** 新增 `qq_cover`：整首歌换成她的声音唱。`python/feiyu_cover.py` 先让 demucs 把人声和伴奏分开，人声过肥鱼 RVC（保留原旋律和节奏、只换音色），再和伴奏混回去，直接出 mp3。8 秒的歌实测分离十几秒、换声 5.5 秒；整首三分钟大概 2–4 分钟，`coverTimeoutMs` 默认 30 分钟。整首歌装不进语音条，结果按文件发。demucs 权重用的是 htdemucs_ft 里单个 80 MB 的子模型，放在 `E:\feiyu\models\demucs\`；官方下载站在本机只有 0.1–0.4 MB/s，镜像是 1 MB/s 以上，而且是同一个文件（demucs 自己校验 sha 前缀）
+- **0.95.3** 本地声音补上「她自己的声音」：`python/feiyu_tts_server.py` 是 CosyVoice3 的常驻 worker（启动 19.7 秒，之后每句 **1.9 秒**，占约 3.5 GB 显存），`qq_voice` 直接用它念，断句和语气都是她的；`speech.local.ttsWarm` 关掉就回落「原声 + 变声」，再不行回落 DeepSeek。`qq_voice_service` 的 status 现在分开报变声进程和 TTS 进程。另外把唱歌引擎（SoulX-Singer）也装好并在服务里打开，`singing` 可以按 MIDI + 歌词唱；整首翻唱（分离 → 换声 → 混音）还需要下一步
+- **0.95.2** 修：本地声音的日志参数只认函数，传 logger 对象时构造就抛 `this.log is not a function`。现在两种都收（`LocalVoice` 与常驻 worker 一致）
+- **0.95.1** 本地肥鱼声音加「常驻预热」：引擎进程留在后台不退出，模型和 CUDA 上下文一直热着，每句从 10 秒降到 **0.12–0.2 秒**（实测 121/143/199 ms），代价是约 900 MB 显存 + 2.1 GB 内存。开关（`speech.local.warm`，默认开）关掉就退回每句重开进程的 10 秒模式；`idleStopMinutes` 改成「没语音多少分钟后退出（0=一直常驻）」。实现是插件自带的 `python/feiyu_warm_server.py`：stdin/stdout 走 JSON 行协议，引擎自己的输出全部改道 stderr，转换失败只回一条错误、进程不退出。作者原版是 Linux 写的，这里按 Windows 原生跑：venv 里的 python.exe、`taskkill /T /F` 收进程树、soundfile 出声（不用 ffmpeg）、路径全用绝对路径不做 symlink
+- **0.95.0** 新增「本地肥鱼声音」（可选，默认关）：`qq_voice` 可以先用自己的声音念——装了 TTS 就直接文字转她的声音，只装 RVC 就用原声合成再换音色，两条路都不通时才回落原来的 DeepSeek 语音，回落时会说一句为什么。设置 →「语音」多了总开关、安装目录、`cute`/`gentle` 音色、空闲 N 分钟自动退出；关掉开关会直接杀掉服务进程树，不是只改个布尔值。另加 `qq_voice_service` 工具（status/start/stop）让模型自己查状态和在你要它闭嘴时停掉。装法见 [本地肥鱼声音](docs/feiyu-voice.md)：原生 Windows 跑，不用 WSL
+
 ## 0.94.x
 - **0.94.1** 语音多一层朗读化改写：发之前先去掉 Markdown 和 emoji、把长句按语气词切成短句补停顿、`：；` 换逗号、没标点的补句号；模型可传 `tone`（开心/难过/生气）只改句尾标点，一个字不改。TTS 没有情绪和语速参数，语气只能从文本和标点里来
 - **0.94.0** 新增语音：模型多了个 `qq_voice` 工具（只有管理员能用），说「念一句…」「发语音」「用语音回复我」「读给我听」它就自己张嘴，不用打 `/语音`。文字走 DeepSeek 的 `POST /v1/tools/tts` 合成 wav，落盘后用 OneBot 的 `record` 段发出去，SnowLuma 负责转 silk，QQ 里看到的是正常语音条。音色 `stella`（海星，女声）/ `tide`（暗潮，男声），key、音色、接口地址在设置 →「语音」里填，汉字算 2 个字符，1.5 元每万字
