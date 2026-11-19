@@ -88,6 +88,63 @@ def separate(root: Path, audio: Path, device: str, workdir: Path) -> tuple[Path,
     return vocals, instrumental
 
 
+def estimate_shift(vocals: Path) -> int:
+    """How many semitones the vocal sits below a female register.
+
+    RVC only moves the timbre: it keeps the f0 it is given. Feed it a male lead
+    at 110 Hz and the female model has to sing an octave below where it lives,
+    which is exactly where the thin, throaty sound comes from. One octave up is
+    the safe fix; a female lead (>= 165 Hz median) is left alone.
+    """
+    import numpy as np
+    import soundfile as sf
+
+    data, rate = sf.read(str(vocals), always_2d=True)
+    mono = data.mean(axis=1).astype(np.float32)
+    if rate != 16_000:
+        import librosa
+
+        mono = librosa.resample(mono, orig_sr=rate, target_sr=16_000)
+        rate = 16_000
+    # 20 s from the loudest stretch beats sampling the whole song for speed and
+    # for signal: intros are often quiet or spoken.
+    window = 20 * rate
+    if len(mono) > window:
+        energy = np.array([np.sqrt((mono[i:i + window] ** 2).mean()) for i in range(0, len(mono) - window, window)])
+        start = int(np.argmax(energy)) * window if len(energy) else 0
+        mono = mono[start:start + window]
+    import librosa
+
+    f0 = librosa.yin(mono, fmin=60, fmax=500, sr=rate, frame_length=1024, hop_length=256)
+    f0 = f0[np.isfinite(f0) & (f0 > 60)]
+    if len(f0) == 0:
+        return 0
+    median = float(np.median(f0))
+    # Measured on three real songs: male lead ~169 Hz, female lead ~327 Hz, and
+    # an instrumental track drifts to ~236. 200 Hz splits the first two cleanly.
+    shift = 12 if median < 200 else 0
+    log(f"vocal f0 ~{median:.0f} Hz -> pitch {shift:+d} semitones")
+    return shift
+
+
+def shift_pitch(vocals: Path, semitones: int, workdir: Path) -> Path:
+    """Transpose the vocal before RVC, keeping the tempo."""
+    import librosa
+    import numpy as np
+    import soundfile as sf
+
+    data, rate = sf.read(str(vocals), always_2d=True)
+    channels = [
+        librosa.effects.pitch_shift(data[:, index].astype(np.float32), sr=rate, n_steps=semitones)
+        for index in range(data.shape[1])
+    ]
+    shifted = np.stack(channels, axis=1)
+    output = workdir / "vocals-shifted.wav"
+    sf.write(str(output), shifted, rate, subtype="PCM_16")
+    log(f"transposed vocal {semitones:+d} semitones -> {output.name}")
+    return output
+
+
 def convert(root: Path, vocals: Path, workdir: Path, device: str) -> Path:
     """Move the separated vocals to her timbre with the RVC package."""
     package = root / "models" / "FeiyuVoice-RVC"
@@ -213,6 +270,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--vocals-only", action="store_true", help="skip the mix")
     parser.add_argument("--mp3", action="store_true", help="also write an mp3 next to the wav")
     parser.add_argument("--stems", type=Path, help="reuse existing vocals/instrumental stems")
+    parser.add_argument(
+        "--pitch",
+        default="auto",
+        help="semitones to lift the vocal before RVC; 'auto' reads the f0 (male lead -> +12)",
+    )
     args = parser.parse_args(argv)
 
     source = args.input.resolve()
@@ -228,6 +290,13 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit(f"{args.stems} 里没有 vocals.wav / instrumental.wav")
     else:
         vocals, instrumental = separate(args.root, source, args.device, workdir)
+
+    try:
+        semitones = int(args.pitch) if str(args.pitch) != "auto" else estimate_shift(vocals)
+    except ValueError:
+        raise SystemExit(f"--pitch 只收整数或 auto：{args.pitch}")
+    if semitones != 0:
+        vocals = shift_pitch(vocals, semitones, workdir)
 
     converted = convert(args.root, vocals, workdir, args.device)
     if args.vocals_only:

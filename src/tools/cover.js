@@ -72,6 +72,10 @@ export function registerQqCoverTool(ctx, options) {
           description: 'Mux the original picture back under the cover and post the mp4 as a file. Use it when they asked to 合成视频 / 发视频.',
         },
         keepVocalsOnly: { type: 'boolean', description: 'Return just her isolated singing, without the backing track.' },
+        pitch: {
+          type: 'integer',
+          description: 'Semitones to lift the vocal before the timbre swap. Leave it out (auto) — a male lead is detected and lifted an octave.',
+        },
         asVoice: {
           type: 'boolean',
           description: 'Send the cover straight into the chat as a QQ voice message. Only for short clips (a minute or less); a full song will not fit and should be a file instead.',
@@ -126,6 +130,7 @@ export function registerQqCoverTool(ctx, options) {
       const output = join(work, 'cover.wav');
       const argv = ['-B', script, '--input', wav, '--output', output, '--root', root, '--mp3'];
       if (args.keepVocalsOnly === true) argv.push('--vocals-only');
+      if (Number.isFinite(Number(args.pitch))) argv.push('--pitch', String(Math.trunc(Number(args.pitch))));
 
       const timeout = Number(local.config().coverTimeoutMs ?? 1_800_000);
       options.log?.(`qq_cover: ${wav} -> ${output} (timeout ${Math.round(timeout / 1000)}s)`);
