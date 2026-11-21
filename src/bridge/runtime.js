@@ -601,7 +601,12 @@ export class Bridge {
       ),
       reconnect: config.connection.reconnect,
       onEvent: event => {
-        void this.handle(event);
+        // A handler that throws must never take the host down with it: DSH
+        // treats an unhandled rejection as a fatal load failure. Log and go on.
+        void this.handle(event).catch(error => {
+          this.counters.errors += 1;
+          this.log(`event handling failed: ${String(error?.message ?? error).slice(0, 200)}`);
+        });
       },
       onState: (state, detail) => {
         this.state = state;
@@ -609,7 +614,12 @@ export class Bridge {
         this.log(`transport ${state}${detail === undefined ? '' : ` (${detail})`}`);
         // Sending needs a live transport: a recovery attempted while the socket
         // is still opening would fail and lose the turn a second time.
-        if (state === 'online') void this.#recoverPendingTurns();
+        if (state === 'online') {
+          void this.#recoverPendingTurns().catch(error => {
+            this.counters.errors += 1;
+            this.log(`pending turn recovery failed: ${String(error?.message ?? error).slice(0, 200)}`);
+          });
+        }
       },
       onError: error => {
         this.counters.errors += 1;
@@ -1410,7 +1420,16 @@ export class Bridge {
     if (decision.accepted !== true) {
       this.counters.ignored += 1;
       if (decision.reason === 'stranger-notice' && message.kind === 'dm') {
-        await this.sendText(message, '这个机器人不接受陌生人的指令。');
+        // QQ refuses private messages to anyone who never added the bot
+        // (retcode 100), and service accounts such as QQ邮箱提醒 are not
+        // strangers at all. The notice is best effort: a failure stays a log
+        // line instead of crashing the host.
+        try {
+          await this.sendText(message, '这个机器人不接受陌生人的指令。');
+        } catch (error) {
+          this.counters.errors += 1;
+          this.log(`stranger notice to ${message.senderId} failed: ${String(error?.message ?? error).slice(0, 160)}`);
+        }
       }
       return;
     }
